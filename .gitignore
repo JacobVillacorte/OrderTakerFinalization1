@@ -1,0 +1,4 @@
+AutoBackups/
+Objects/
+*.log
+*.tmp

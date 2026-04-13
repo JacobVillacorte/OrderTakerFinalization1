@@ -1,0 +1,337 @@
+﻿Build1=Default,b4a.OrderTakerTest1
+File1=addOrderActivity.bal
+File2=bggg.jpg
+File3=customerSelection.bal
+File4=forgotPass.bal
+File5=loginTest1.db
+File6=main.bal
+File7=OrderTakerDashboard.bal
+FileGroup1=Default Group
+FileGroup2=Default Group
+FileGroup3=Default Group
+FileGroup4=Default Group
+FileGroup5=Default Group
+FileGroup6=Default Group
+FileGroup7=Default Group
+Group=Default Group
+Library1=core
+Library2=json
+Library3=okhttputils2
+Library4=phone
+Library5=sql
+Library6=xcustomlistview
+Library7=xui
+Library8=xui views
+ManifestCode='This code will be applied to the manifest file during compilation.~\n~'You do not need to modify it in most cases.~\n~'See this link for for more information: https://www.b4x.com/forum/showthread.php?p=78136~\n~AddManifestText(~\n~<uses-sdk android:minSdkVersion="21" android:targetSdkVersion="35"/>~\n~<supports-screens android:largeScreens="true" ~\n~    android:normalScreens="true" ~\n~    android:smallScreens="true" ~\n~    android:anyDensity="true"/>)~\n~SetApplicationAttribute(android:icon, "@drawable/icon")~\n~SetApplicationAttribute(android:label, "$LABEL$")~\n~CreateResourceFromFile(Macro, Themes.LightTheme)~\n~SetApplicationAttribute(android:usesCleartextTraffic, "true")~\n~AddPermission(android.permission.INTERNET)~\n~AddPermission(android.permission.ACCESS_NETWORK_STATE)~\n~'End of default text.~\n~
+Module1=addOrderActivity
+Module2=Charts
+Module3=customerSelection
+Module4=forgotPass
+Module5=OrderTakerDashboard
+Module6=Starter
+NumberOfFiles=7
+NumberOfLibraries=8
+NumberOfModules=6
+Version=13.4
+@EndOfDesignText@
+#Region  Project Attributes 
+    #ApplicationLabel: Order Taker Test 1
+    #VersionCode: 1
+    #VersionName: 1.0
+    #SupportedOrientations: portrait
+    #CanInstallToExternalStorage: False
+#End Region
+
+#Region  Activity Attributes 
+    #FullScreen: False
+    #IncludeTitle: False
+#End Region
+
+Sub Process_Globals
+	' Device info
+	Private p As Phone
+	Public VENDOR_ID As Int = 0
+	Public DEVICE_ID As String
+
+	' Databases
+	Public SQLLogin As SQL
+	Public SQLProducts As SQL
+
+	' Session
+	Public LoggedInUser As String
+	Public LoggedInUserID As Int
+	Public LoggedInUserFullName As String
+	Public LoggedInGroupID As Int
+	Public LoggedInConventionID As Int = 5
+	Public LoggedInRequiresVendorSelection As Boolean
+	Public AssignedVendors As List
+	' Selected customer (set by CustomerSelection activity)
+	Public SELECTED_CUSTOMER_ID As Int = 0
+	Public SELECTED_CUSTOMER_CODE As String = ""
+	Public SELECTED_CUSTOMER_NAME As String = ""
+	Public SELECTED_CUSTOMER_OWNER As String = ""
+	Public SELECTED_CUSTOMER_ADDRESS As String = ""
+	Public COPY_ORDER_SOURCE_ID As Int = 0
+
+	' API base URL (important: base path only, not specific endpoint)
+	Public API_URL As String = "http://192.168.8.85/ordertaker_api/"
+	Public ITEMS_LAST_SYNC As Long = 0
+
+	Private xui As XUI
+End Sub
+
+Sub Globals
+	Private Label1 As Label
+	Private Label2 As Label
+	Private bttnLogin As Button
+	Private etuser As EditText
+	Private etpassword As EditText
+	Private lbluser As Label
+	Private lblpass As Label
+	Private lblforgot As Label
+End Sub
+
+Sub Activity_Create(FirstTime As Boolean)
+	Activity.LoadLayout("main")
+	etpassword.PasswordMode = True
+
+	If FirstTime Then
+		GetAndSaveDeviceID
+		SetupLoginDatabase
+	End If
+
+	SetupProductsDatabase
+End Sub
+
+Sub Activity_Resume
+End Sub
+
+Sub Activity_Pause(UserClosed As Boolean)
+End Sub
+
+' Gets the unique Android device ID and stores it in DEVICE_ID
+Private Sub GetAndSaveDeviceID
+	DEVICE_ID = p.GetSettings("android_id")
+	Log("Device ID: " & DEVICE_ID)
+End Sub
+
+' Copies login database from assets if it doesn't exist yet, then opens it
+Sub SetupLoginDatabase
+	If File.Exists(File.DirInternal, "loginTest1.db") = False Then
+		File.Copy(File.DirAssets, "loginTest1.db", File.DirInternal, "loginTest1.db")
+	End If
+	SQLLogin.Initialize(File.DirInternal, "loginTest1.db", True)
+
+	SQLLogin.ExecNonQuery("CREATE TABLE IF NOT EXISTS offline_login_cache (" & _
+        "login_name TEXT PRIMARY KEY, " & _
+        "password TEXT, " & _
+        "user_id INTEGER, " & _
+        "full_name TEXT, " & _
+        "group_id INTEGER, " & _
+        "vendor_id INTEGER, " & _
+        "convention_id INTEGER, " & _
+        "last_verified INTEGER)")
+End Sub
+
+' Opens the products/orders database and creates the items table if it doesn't exist
+Private Sub SetupProductsDatabase
+	SQLProducts.Initialize(File.DirInternal, "productsTest1.db", True)
+	SQLProducts.ExecNonQuery("CREATE TABLE IF NOT EXISTS items (" & _
+        "item_id INTEGER PRIMARY KEY, " & _
+        "item_code TEXT, " & _
+        "item_name TEXT, " & _
+        "unit_price REAL, " & _
+        "barcode TEXT, " & _
+        "vendor_id INTEGER, " & _
+        "is_active INTEGER)")
+	
+	' Customers table for offline selection (cached via Fetch)
+	SQLProducts.ExecNonQuery("CREATE TABLE IF NOT EXISTS mst_customers (" & _
+		"customer_id INTEGER PRIMARY KEY, " & _
+		"customer_code TEXT, " & _
+		"customer_name TEXT, " & _
+		"business_owner TEXT, " & _
+		"address TEXT, " & _
+		"is_active INTEGER, " & _
+		"branch_id INTEGER, " & _
+		"category TEXT)")
+	
+	' Index to speed up searches
+	SQLProducts.ExecNonQuery("CREATE INDEX IF NOT EXISTS idx_mst_customers_search ON mst_customers(customer_code, customer_name, business_owner, address)")
+End Sub
+
+' Triggered when user taps the Login button
+Private Sub bttnLogin_Click
+	Dim username As String = etuser.Text.Trim
+	Dim password As String = etpassword.Text.Trim
+
+	If username = "" Then
+		etuser.RequestFocus
+		ToastMessageShow("Please enter your username", False)
+		Return
+	End If
+
+	If password = "" Then
+		etpassword.RequestFocus
+		ToastMessageShow("Please enter your password", False)
+		Return
+	End If
+
+	Dim payload As Map
+	payload.Initialize
+	payload.Put("login_name", username)
+	payload.Put("password", password)
+	payload.Put("convention_id", LoggedInConventionID)
+
+	Dim jg As JSONGenerator
+	jg.Initialize(payload)
+
+	ProgressDialogShow("Logging in...")
+
+	Dim j As HttpJob
+	j.Initialize("LoginOrderTaker", Me)
+	j.PostString(API_URL & "login_order_taker.php", jg.ToString)
+	j.GetRequest.SetContentType("application/json")
+
+	Wait For (j) JobDone(j As HttpJob)
+	ProgressDialogHide
+
+	If j.Success = False Then
+		If TryOfflineLogin(username, password) Then
+			ToastMessageShow("Offline login mode.", False)
+			StartActivity(OrderTakerDashboard)
+			Activity.Finish
+		Else
+			ToastMessageShow("Cannot reach server and no offline login found.", True)
+		End If
+		j.Release
+		Return
+	End If
+
+	Try
+		Dim parser As JSONParser
+		parser.Initialize(j.GetString)
+		Dim root As Map = parser.NextObject
+
+		Dim status As String = root.Get("status")
+		Dim msg As String = ""
+		If root.ContainsKey("message") And root.Get("message") <> Null Then msg = root.Get("message")
+
+		If status <> "success" Then
+			If msg = "" Then msg = "Login failed."
+			ToastMessageShow(msg, True)
+			j.Release
+			Return
+		End If
+
+		Dim data As Map = root.Get("data")
+
+		LoggedInUser = data.Get("login_name")
+		LoggedInUserID = data.Get("user_id")
+		LoggedInUserFullName = data.Get("full_name")
+		LoggedInGroupID = data.Get("group_id")
+
+		If data.ContainsKey("convention_id") And data.Get("convention_id") <> Null Then
+			LoggedInConventionID = data.Get("convention_id")
+		End If
+
+		LoggedInRequiresVendorSelection = False
+		If data.ContainsKey("requires_vendor_selection") And data.Get("requires_vendor_selection") <> Null Then
+			LoggedInRequiresVendorSelection = data.Get("requires_vendor_selection")
+		End If
+
+		VENDOR_ID = 0
+		If data.ContainsKey("vendor_id") And data.Get("vendor_id") <> Null Then
+			VENDOR_ID = data.Get("vendor_id")
+		End If
+
+		AssignedVendors.Initialize
+		If data.ContainsKey("assigned_vendors") And data.Get("assigned_vendors") <> Null Then
+			AssignedVendors = data.Get("assigned_vendors")
+		End If
+
+		If VENDOR_ID = 0 And AssignedVendors.IsInitialized And AssignedVendors.Size > 0 Then
+			Dim firstVendor As Map = AssignedVendors.Get(0)
+			VENDOR_ID = firstVendor.Get("vendor_id")
+			ToastMessageShow("Multiple vendor assignments found. Using first vendor for now.", False)
+		End If
+
+		If VENDOR_ID <= 0 Then
+			ToastMessageShow("No vendor assignment found for this user.", True)
+			j.Release
+			Return
+		End If
+
+		SaveOfflineLoginCache(username, password, LoggedInUserID, LoggedInUserFullName, LoggedInGroupID, VENDOR_ID, LoggedInConventionID)
+		HandleUserSwitchCacheReset(LoggedInUserID)
+
+		ToastMessageShow("Login Successful!", False)
+		StartActivity(OrderTakerDashboard)
+		Activity.Finish
+
+	Catch
+		ToastMessageShow("Invalid login response from server.", True)
+	End Try
+
+	j.Release
+End Sub
+
+Private Sub SaveOfflineLoginCache(loginName As String, plainPassword As String, userID As Int, fullName As String, groupID As Int, vendorID As Int, conventionID As Int)
+	SQLLogin.ExecNonQuery2( _
+        "INSERT OR REPLACE INTO offline_login_cache (login_name, password, user_id, full_name, group_id, vendor_id, convention_id, last_verified) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", _
+        Array As Object(loginName, plainPassword, userID, fullName, groupID, vendorID, conventionID, DateTime.Now))
+End Sub
+
+Private Sub TryOfflineLogin(loginName As String, plainPassword As String) As Boolean
+	Try
+		Dim rs As ResultSet = SQLLogin.ExecQuery2( _
+            "SELECT * FROM offline_login_cache WHERE login_name = ? AND password = ? AND group_id = 4", _
+            Array As String(loginName, plainPassword))
+
+		If rs.RowCount = 0 Then
+			rs.Close
+			Return False
+		End If
+
+		rs.Position = 0
+		LoggedInUser = rs.GetString("login_name")
+		LoggedInUserID = rs.GetInt("user_id")
+		LoggedInUserFullName = rs.GetString("full_name")
+		LoggedInGroupID = rs.GetInt("group_id")
+		LoggedInConventionID = rs.GetInt("convention_id")
+		VENDOR_ID = rs.GetInt("vendor_id")
+		LoggedInRequiresVendorSelection = False
+		AssignedVendors.Initialize
+		rs.Close
+
+		If VENDOR_ID <= 0 Then Return False
+
+		HandleUserSwitchCacheReset(LoggedInUserID)
+		Return True
+	Catch
+		Return False
+	End Try
+End Sub
+
+Private Sub HandleUserSwitchCacheReset(newUserID As Int)
+	Dim lastUserID As Int = 0
+
+	If File.Exists(File.DirInternal, "last_user_id.txt") Then
+		Dim txt As String = File.ReadString(File.DirInternal, "last_user_id.txt")
+		If txt <> "" Then lastUserID = txt
+	End If
+
+	' Keep cached items so offline still works after login.
+	If lastUserID > 0 And lastUserID <> newUserID Then
+		Log("User switched. Keeping cached items for offline use.")
+	End If
+
+	File.WriteString(File.DirInternal, "last_user_id.txt", newUserID)
+End Sub
+
+
+
+' Triggered when user taps "Forgot Password"
+Private Sub lblforgot_Click
+	StartActivity(forgotPass)
+End Sub
