@@ -3,8 +3,7 @@ ModulesStructureVersion=1
 Type=StaticCode
 Version=1.80
 @EndOfDesignText@
-'Code module
-#IgnoreWarnings: 12
+
 Sub Process_Globals
 	'VERSION: 1.04
 	Type PieItem (Name As String, Value As Float, Color As Int)
@@ -19,31 +18,28 @@ Sub Process_Globals
 End Sub
 
 #Region Bar chart methods
-<<<<<<< Updated upstream
+'Sub AddBarPoint (BD As BarData, X As String, YArray() As Float)
+'	If BD.Points.IsInitialized = False Then
+'		BD.Points.Initialize
+'		'Add a "dummy" point as the first point to avoid drawing on the Y axis.
+'		Dim b As LinePoint
+'		b.Initialize
+'		b.X = ""
+'		b.ShowTick = False
+'		BD.Points.Add(b)
+'	End If
+'	Dim b As LinePoint 'using the same structure of Line charts
+'	b.Initialize
+'	b.X = X
+'	b.YArray = YArray
+'	b.ShowTick = True
+'	BD.Points.Add(b)
+'End Sub
 
-=======
-Sub AddBarPoint (BD As BarData, X As String, YArray() As Float)
-	If BD.Points.IsInitialized = False Then
-		BD.Points.Initialize
-		'Add a "dummy" point as the first point to avoid drawing on the Y axis.
-		Dim b As LinePoint
-		b.Initialize
-		b.X = ""
-		b.ShowTick = False
-		BD.Points.Add(b)
-	End If
-	Dim b As LinePoint 'using the same structure of Line charts
-	b.Initialize
-	b.X = X
-	b.YArray = YArray
-	b.ShowTick = True
-	BD.Points.Add(b)
-End Sub
-
-Sub AddBarColor(BD As BarData, Color As Int)
-	If BD.BarsColors.IsInitialized = False Then BD.BarsColors.Initialize
-	BD.BarsColors.Add(Color)
-End Sub
+'Sub AddBarColor(BD As BarData, Color As Int)
+'	If BD.BarsColors.IsInitialized = False Then BD.BarsColors.Initialize
+'	BD.BarsColors.Add(Color)
+'End Sub
 
 Sub DrawBarsChart(G As Graph, BD As BarData, BackColor As Int)
 	If BD.Points.Size = 0 Then
@@ -165,11 +161,81 @@ Sub drawGraph (G As Graph, Canvas As Canvas, Target As View, Points As List, Bar
 		End If
 	Next
 End Sub
->>>>>>> Stashed changes
 #End Region
 
 #Region Line charts related methods
+'Sub AddLinePoint (LD As LineData, X As String, Y As Float, ShowTick As Boolean)
+'	If LD.Points.IsInitialized = False Then LD.Points.Initialize
+'	Dim p As LinePoint
+'	p.Initialize
+'	p.X = X
+'	p.Y = Y
+'	p.ShowTick = ShowTick
+'	LD.Points.Add(p)
+'End Sub
 
+'Sub AddLineMultiplePoints(LD As LineData, X As String, YArray() As Float, ShowTick As Boolean)
+'	If LD.Points.IsInitialized = False Then LD.Points.Initialize
+'	Dim p As LinePoint
+'	p.Initialize
+'	p.X = X
+'	p.YArray = YArray
+'	p.ShowTick = ShowTick
+'	LD.Points.Add(p)
+'End Sub
+
+'Sub AddLineColor(LD As LineData, Color As Int)
+'	If LD.LinesColors.IsInitialized = False Then LD.LinesColors.Initialize
+'	LD.LinesColors.Add(Color)
+'End Sub
+
+Sub DrawLineChart(G As Graph, LD As LineData, BackColor As Int)
+	If LD.Points.Size = 0 Then
+		ToastMessageShow("Missing line points.", True)
+		Return
+	End If
+	LD.Canvas.Initialize(LD.Target)
+	LD.Canvas.DrawColor(BackColor)
+	drawGraph(G, LD.Canvas, LD.Target, LD.Points, False, 0)
+	'Draw data lines
+	Dim point As LinePoint
+	point = LD.Points.Get(0)
+	If point.YArray.Length > 0 Then
+		'multiple lines
+		Dim py2(point.YArray.Length) As Float
+		'initialize first point
+		For i = 0 To py2.Length - 1
+			py2(i) = point.YArray(i)
+		Next
+		'draw all points
+		For i = 1 To LD.Points.Size - 1
+			point = LD.Points.Get(i)
+			For a = 0 To py2.Length - 1
+				LD.Canvas.DrawLine(G.GI.originX + G.GI.intervalX * (i - 1), calcPointToPixel(py2(a), G), G.GI.originX + G.GI.intervalX * i, calcPointToPixel(point.YArray(a), G), LD.LinesColors.Get(a), 2dip)
+				py2(a) = point.YArray(a)
+			Next
+		Next
+	Else
+		'Single line
+		Dim py As Float
+		py = point.Y
+		For i = 1 To LD.Points.Size - 1
+			point = LD.Points.Get(i)
+			LD.Canvas.DrawLine(G.GI.originX + G.GI.intervalX * (i - 1), calcPointToPixel(py, G) _
+				, G.GI.originX + G.GI.intervalX * i, calcPointToPixel(point.Y, G), LD.LinesColors.Get(0), 2dip)
+			py = point.Y
+		Next
+	End If
+	LD.Target.Invalidate
+End Sub
+
+Sub calcPointToPixel(py As Float, G As Graph) As Int
+	If G.YStart < 0 And G.YEnd > 0 Then
+		Return G.GI.zeroY - (G.GI.originY - G.GI.maxY) * py / (G.YEnd - G.YStart)
+	Else
+		Return G.GI.originY - (G.GI.originY - G.GI.maxY) * (py - G.YStart) / (G.YEnd - G.YStart)
+	End If
+End Sub
 #End Region
 
 #Region  Pie related methods
@@ -264,7 +330,3 @@ Sub createLegend(PD As PieData) As Bitmap
 	Return bmp
 End Sub
 #End Region
-
-
-
-
