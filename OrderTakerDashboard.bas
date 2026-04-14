@@ -730,7 +730,7 @@ Private Sub bttnFetchProducts_Click
 	fetchJob.Initialize("FetchProducts", Me)
 	currentFetchJob = fetchJob
 
-	Dim fetchUrl As String = Main.API_URL & "get_items.php?vendor_id=" & Main.VENDOR_ID
+	Dim fetchUrl As String = Main.API_URL & "API/get_items.php?vendor_id=" & Main.VENDOR_ID
 	fetchJob.Download(fetchUrl)
 
 	Wait For (fetchJob) JobDone(jobFetch As HttpJob)
@@ -751,7 +751,7 @@ Private Sub bttnFetchProducts_Click
 	Dim custJob As HttpJob
 	custJob.Initialize("FetchCustomers", Me)
 	currentCustomerJob = custJob
-	Dim custUrl As String = Main.API_URL & "search_customers.php?limit=1000"
+	Dim custUrl As String = Main.API_URL & "API/search_customers.php?limit=1000"
 	custJob.Download(custUrl)
 
 	Wait For (custJob) JobDone(jobCust As HttpJob)
@@ -1203,7 +1203,7 @@ Private Sub SyncNextPendingOrder
 	Dim syncJob As HttpJob
 	syncJob.Initialize("SyncOrder", Me)
 	currentSyncJob = syncJob
-	syncJob.PostString(Main.API_URL & "sync_order.php", payload)
+	syncJob.PostString(Main.API_URL & "API/sync_order.php", payload)
 
 	Wait For (syncJob) JobDone(jobSync As HttpJob)
 	If jobSync.Success Then

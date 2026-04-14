@@ -6,6 +6,7 @@ File4=forgotPass.bal
 File5=loginTest1.db
 File6=main.bal
 File7=OrderTakerDashboard.bal
+File8=SupervisorOrderTakerSelection.bal
 FileGroup1=Default Group
 FileGroup2=Default Group
 FileGroup3=Default Group
@@ -13,6 +14,7 @@ FileGroup4=Default Group
 FileGroup5=Default Group
 FileGroup6=Default Group
 FileGroup7=Default Group
+FileGroup8=Default Group
 Group=Default Group
 Library1=core
 Library2=json
@@ -29,13 +31,14 @@ Module3=customerSelection
 Module4=forgotPass
 Module5=OrderTakerDashboard
 Module6=Starter
-NumberOfFiles=7
+Module7=SupervisorOrderTakerSelection
+NumberOfFiles=8
 NumberOfLibraries=8
-NumberOfModules=6
+NumberOfModules=7
 Version=13.4
 @EndOfDesignText@
 #Region  Project Attributes 
-    #ApplicationLabel: Order Taker Test 1
+    #ApplicationLabel: Order Taker Test 3
     #VersionCode: 1
     #VersionName: 1.0
     #SupportedOrientations: portrait
@@ -65,6 +68,17 @@ Sub Process_Globals
 	Public LoggedInConventionID As Int = 5
 	Public LoggedInRequiresVendorSelection As Boolean
 	Public AssignedVendors As List
+	Public IsSupervisorMode As Boolean
+	Public SupervisorUserID As Int
+	Public SupervisorLoginName As String
+	Public SupervisorFullName As String
+	Public SelectedOrderTakerUserID As Int
+	Public SelectedOrderTakerLoginName As String
+	Public SelectedOrderTakerFullName As String
+	Public SelectedOrderTakerGroupID As Int
+	Public SelectedOrderTakerVendorID As Int
+	Public SelectedOrderTakerRequiresVendorSelection As Boolean
+	Public SelectedOrderTakerAssignedVendors As List
 	' Selected customer (set by CustomerSelection activity)
 	Public SELECTED_CUSTOMER_ID As Int = 0
 	Public SELECTED_CUSTOMER_CODE As String = ""
@@ -74,7 +88,7 @@ Sub Process_Globals
 	Public COPY_ORDER_SOURCE_ID As Int = 0
 
 	' API base URL (important: base path only, not specific endpoint)
-	Public API_URL As String = "http://192.168.8.85/ordertaker_api/"
+	Public API_URL As String = "http://192.168.8.224/ordertaker_api/"
 	Public ITEMS_LAST_SYNC As Long = 0
 
 	Private xui As XUI
@@ -190,7 +204,7 @@ Private Sub bttnLogin_Click
 
 	Dim j As HttpJob
 	j.Initialize("LoginOrderTaker", Me)
-	j.PostString(API_URL & "login_order_taker.php", jg.ToString)
+	j.PostString(API_URL & "API/login_order_taker.php", jg.ToString)
 	j.GetRequest.SetContentType("application/json")
 
 	Wait For (j) JobDone(j As HttpJob)
@@ -199,7 +213,11 @@ Private Sub bttnLogin_Click
 	If j.Success = False Then
 		If TryOfflineLogin(username, password) Then
 			ToastMessageShow("Offline login mode.", False)
-			StartActivity(OrderTakerDashboard)
+			If LoggedInGroupID = 11 Or IsSupervisorMode Then
+				StartActivity(SupervisorOrderTakerSelection)
+			Else
+				StartActivity(OrderTakerDashboard)
+			End If
 			Activity.Finish
 		Else
 			ToastMessageShow("Cannot reach server and no offline login found.", True)
@@ -230,6 +248,17 @@ Private Sub bttnLogin_Click
 		LoggedInUserID = data.Get("user_id")
 		LoggedInUserFullName = data.Get("full_name")
 		LoggedInGroupID = data.Get("group_id")
+		IsSupervisorMode = False
+		SupervisorUserID = 0
+		SupervisorLoginName = ""
+		SupervisorFullName = ""
+		SelectedOrderTakerUserID = 0
+		SelectedOrderTakerLoginName = ""
+		SelectedOrderTakerFullName = ""
+		SelectedOrderTakerGroupID = 0
+		SelectedOrderTakerVendorID = 0
+		SelectedOrderTakerRequiresVendorSelection = False
+		SelectedOrderTakerAssignedVendors.Initialize
 
 		If data.ContainsKey("convention_id") And data.Get("convention_id") <> Null Then
 			LoggedInConventionID = data.Get("convention_id")
@@ -256,7 +285,7 @@ Private Sub bttnLogin_Click
 			ToastMessageShow("Multiple vendor assignments found. Using first vendor for now.", False)
 		End If
 
-		If VENDOR_ID <= 0 Then
+		If VENDOR_ID <= 0 And LoggedInGroupID <> 11 Then
 			ToastMessageShow("No vendor assignment found for this user.", True)
 			j.Release
 			Return
@@ -266,7 +295,15 @@ Private Sub bttnLogin_Click
 		HandleUserSwitchCacheReset(LoggedInUserID)
 
 		ToastMessageShow("Login Successful!", False)
-		StartActivity(OrderTakerDashboard)
+		If LoggedInGroupID = 11 Then
+			IsSupervisorMode = True
+			SupervisorUserID = LoggedInUserID
+			SupervisorLoginName = LoggedInUser
+			SupervisorFullName = LoggedInUserFullName
+			StartActivity(SupervisorOrderTakerSelection)
+		Else
+			StartActivity(OrderTakerDashboard)
+		End If
 		Activity.Finish
 
 	Catch
@@ -285,7 +322,7 @@ End Sub
 Private Sub TryOfflineLogin(loginName As String, plainPassword As String) As Boolean
 	Try
 		Dim rs As ResultSet = SQLLogin.ExecQuery2( _
-            "SELECT * FROM offline_login_cache WHERE login_name = ? AND password = ? AND group_id = 4", _
+		"SELECT * FROM offline_login_cache WHERE login_name = ? AND password = ? AND group_id IN (4, 11)", _
             Array As String(loginName, plainPassword))
 
 		If rs.RowCount = 0 Then
@@ -302,9 +339,20 @@ Private Sub TryOfflineLogin(loginName As String, plainPassword As String) As Boo
 		VENDOR_ID = rs.GetInt("vendor_id")
 		LoggedInRequiresVendorSelection = False
 		AssignedVendors.Initialize
+		IsSupervisorMode = False
+		SupervisorUserID = 0
+		SupervisorLoginName = ""
+		SupervisorFullName = ""
+		SelectedOrderTakerUserID = 0
+		SelectedOrderTakerLoginName = ""
+		SelectedOrderTakerFullName = ""
+		SelectedOrderTakerGroupID = 0
+		SelectedOrderTakerVendorID = 0
+		SelectedOrderTakerRequiresVendorSelection = False
+		SelectedOrderTakerAssignedVendors.Initialize
 		rs.Close
 
-		If VENDOR_ID <= 0 Then Return False
+		If LoggedInGroupID <> 11 And VENDOR_ID <= 0 Then Return False
 
 		HandleUserSwitchCacheReset(LoggedInUserID)
 		Return True
