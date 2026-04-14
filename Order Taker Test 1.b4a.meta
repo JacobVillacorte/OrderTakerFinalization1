@@ -21,7 +21,11 @@ ModuleClosedNodes3=
 ModuleClosedNodes4=
 ModuleClosedNodes5=
 ModuleClosedNodes6=
+<<<<<<< Updated upstream
 ModuleClosedNodes7=
 NavigationStack=SupervisorOrderTakerSelection,clvOrderTakers_ItemClick,314,0,OrderTakerDashboard,SyncNextPendingOrder,1199,0,OrderTakerDashboard,Activity_Resume,105,0,OrderTakerDashboard,LoadInventoryItemsIntoScrollView,1485,0,OrderTakerDashboard,UpdateDashboardSummaryLabels,1568,0,Visual Designer,SupervisorOrderTakerSelection.bal,-100,1,OrderTakerDashboard,FormatTimeAgo,1499,0,OrderTakerDashboard,DrawOrderStatusPieChart,1800,0,OrderTakerDashboard,DrawPieChartLegend,1808,0,Main,Process_Globals,16,0
+=======
+NavigationStack=Charts,AddBarPoint,15,0,OrderTakerDashboard,bttnHistoryPrev_Click,1249,0,Visual Designer,ordertakerdashboard.bal,-100,1,Main,Globals,48,0,Main,Process_Globals,45,0,OrderTakerDashboard,DrawPieChartLegend,2046,0,Charts,AddBarColor,33,0,Charts,AddLineColor,181,0,Charts,DrawLineChart,190,0,Charts,DrawPie,250,0,Charts,calcSlice,289,0
+>>>>>>> Stashed changes
 SelectedBuild=0
 VisibleModules=4,5,1,3,2,7
