@@ -188,6 +188,9 @@ Sub EnsureLocalSchema
 	AddColumnIfMissing("orders", "item_count", "INTEGER DEFAULT 0")
 	AddColumnIfMissing("orders", "booking", "INTEGER DEFAULT 0")
 	AddColumnIfMissing("orders", "prepaid", "INTEGER DEFAULT 0")
+	AddColumnIfMissing("orders", "is_paid", "INTEGER DEFAULT 0")
+	AddColumnIfMissing("orders", "is_received", "INTEGER DEFAULT 0")
+	AddColumnIfMissing("orders", "is_booked", "INTEGER DEFAULT 0")
 
 	' order_items table
 	AddColumnIfMissing("order_items", "fulfillment_status", "TEXT DEFAULT ''")
@@ -390,7 +393,7 @@ Private Sub LoadOrdersIntoList
 	If currentOrdersPage > totalOrdersPages Then currentOrdersPage = totalOrdersPages
 	If currentOrdersPage < 1 Then currentOrdersPage = 1
 
-	Dim sql As String = "SELECT * " & GetOrdersWhereClause(searchText) & "ORDER BY date_created DESC LIMIT ? OFFSET ?"
+	Dim sql As String = "SELECT *, IFNULL(is_paid, 0) AS is_paid, IFNULL(is_received, 0) AS is_received, IFNULL(is_booked, 0) AS is_booked " & GetOrdersWhereClause(searchText) & "ORDER BY date_created DESC LIMIT ? OFFSET ?"
 	Dim args() As String = GetOrdersArgs(searchText, True)
 	Dim rs As ResultSet = Main.SQLProducts.ExecQuery2(sql, args)
 
@@ -454,8 +457,8 @@ Private Sub LoadOrdersIntoList
 		' Add order item
 		Dim pnl As Panel
 		pnl.Initialize("")
-		pnl.SetLayout(0, 0, clvContentOrders.AsView.Width, 96dip)
-		pnl.Color = Colors.White ' new
+		pnl.SetLayout(0, 0, clvContentOrders.AsView.Width, 100dip)
+		pnl.Color = Colors.White
 
 		Dim lblOrderID As Label
 		lblOrderID.Initialize("")
@@ -473,9 +476,24 @@ Private Sub LoadOrdersIntoList
 		lblSync.Color = Colors.Transparent
 		lblSync.SetLayout(10dip, 58dip, 120dip, 16dip)
 
+		Dim orderIsPaid As Boolean = rs.GetInt("is_paid") = 1
+		Dim orderIsReceived As Boolean = rs.GetInt("is_received") = 1
+		Dim orderIsBooked As Boolean = rs.GetInt("is_booked") = 1
+
+		Dim lblOrderStatus As Label
+		lblOrderStatus.Initialize("")
+		Dim paidTag As String = IIf(orderIsPaid, "✓Paid", "✗Unpaid")
+		Dim receivedTag As String = IIf(orderIsReceived, "✓Recv", "✗NoRecv")
+		Dim bookedTag As String = IIf(orderIsBooked, "✓Bkd", "✗NoBk")
+		lblOrderStatus.Text = paidTag & "  " & receivedTag & "  " & bookedTag
+		lblOrderStatus.TextSize = 10
+		lblOrderStatus.TextColor = Colors.RGB(80, 80, 80)
+		lblOrderStatus.Gravity = Gravity.LEFT
+		lblOrderStatus.SetLayout(10dip, 78dip, 70%x, 16dip)
+
 		Dim lblTotal As Label
 		lblTotal.Initialize("")
-		lblTotal.Text = "Total: ₱" & NumberFormat2(rs.GetDouble("total_amount"), 1, 2, 2, False) ' new
+		lblTotal.Text = "Total: ₱" & NumberFormat2(rs.GetDouble("total_amount"), 1, 2, 2, False)
 		lblTotal.SetLayout(10dip, 36dip, 55%x, 25dip)
 
 		Dim bttnCopyOrder As Button
@@ -499,6 +517,7 @@ Private Sub LoadOrdersIntoList
 		pnl.AddView(lblOrderID, lblOrderID.Left, lblOrderID.Top, lblOrderID.Width, lblOrderID.Height)
 		pnl.AddView(lblSync, lblSync.Left, lblSync.Top, lblSync.Width, lblSync.Height)
 		pnl.AddView(lblTotal, lblTotal.Left, lblTotal.Top, lblTotal.Width, lblTotal.Height)
+		pnl.AddView(lblOrderStatus, lblOrderStatus.Left, lblOrderStatus.Top, lblOrderStatus.Width, lblOrderStatus.Height)
 		pnl.AddView(bttnCopyOrder, pnl.Width - 128dip, 16dip, 62dip, 35dip)
 		pnl.AddView(bttnDeleteOrder, pnl.Width - 62dip, 16dip, 60dip, 35dip)
 
@@ -590,7 +609,7 @@ End Sub
 Private Sub ShowOrderDetails(orderID As Int)
 	Try
 		Dim cursorOrder As Cursor = Main.SQLProducts.ExecQuery2( _
-	            "SELECT order_id, transaction_number, date_created, total_amount, status, sync_status, customer_id, customer_name, customer_owner, customer_address " & _
+	            "SELECT order_id, transaction_number, date_created, total_amount, status, sync_status, customer_id, customer_name, customer_owner, customer_address, is_paid, is_received, is_booked " & _
 	            "FROM orders WHERE order_id = ?", _
 	            Array As String(orderID))
 
@@ -629,7 +648,22 @@ Private Sub ShowOrderDetails(orderID As Int)
 		Catch
 			orderStatus = ""
 		End Try
-		orderStatus = GetOrderDisplayStatus(orderID, orderStatus)
+
+		Dim isPaid As Boolean = False
+		Dim isReceived As Boolean = False
+		Dim isBooked As Boolean = False
+		Try
+			If HasColumn("orders", "is_paid") Then
+				isPaid = cursorOrder.GetInt("is_paid") = 1
+				isReceived = cursorOrder.GetInt("is_received") = 1
+				isBooked = cursorOrder.GetInt("is_booked") = 1
+				orderStatus = BuildOrderStatusDisplay(isPaid, isReceived, isBooked)
+			Else
+				orderStatus = GetOrderDisplayStatus(orderID, orderStatus)
+			End If
+		Catch
+			orderStatus = GetOrderDisplayStatus(orderID, orderStatus)
+		End Try
 
 		' Try to read customer fields if present (EnsureLocalSchema adds them)
 		Dim customerName As String = ""
@@ -684,13 +718,17 @@ Private Sub ShowOrderDetails(orderID As Int)
 
 		cursorItems.Close
 
+		Dim paidLabel As String = IIf(isPaid, "✓ Paid", "✗ Unpaid")
+		Dim receivedLabel As String = IIf(isReceived, "✓ Received", "✗ Not Received")
+		Dim bookedLabel As String = IIf(isBooked, "✓ Booked", "✗ Not Booked")
+
 		Dim message As String = _
 			"Transaction: " & transactionNumber & CRLF & _
 			(IIf(customerName <> "", "Customer: " & customerName & CRLF, "")) & _
 			(IIf(customerOwner <> "", "Owner: " & customerOwner & CRLF, "")) & _
 			(IIf(customerAddress <> "", "Address: " & customerAddress & CRLF, "")) & _
 			"Date: " & DateTime.Date(orderDate) & CRLF & _
-			"Status: " & orderStatus & CRLF & _
+			paidLabel & "  |  " & receivedLabel & "  |  " & bookedLabel & CRLF & _
 			"Total: ₱" & NumberFormat2(totalAmount, 1, 2, 2, False) & CRLF & CRLF & _
 			"Items:" & CRLF & itemsText
 
@@ -1300,10 +1338,20 @@ Private Sub BuildOrderSyncPayload(rsOrder As ResultSet) As String
 	If itemCount <= 0 Then itemCount = GetLocalOrderItemCount(localOrderID)
 
 	Dim bookingValue As Int = 0
-	If HasColumn("orders", "booking") Then bookingValue = rsOrder.GetInt("booking")
-
 	Dim prepaidValue As Int = 0
-	If HasColumn("orders", "prepaid") Then prepaidValue = rsOrder.GetInt("prepaid")
+	Dim isPaidValue As Int = 0
+	Dim isReceivedValue As Int = 0
+	Dim isBookedValue As Int = 0
+	If HasColumn("orders", "is_paid") Then
+		isPaidValue = rsOrder.GetInt("is_paid")
+		isReceivedValue = rsOrder.GetInt("is_received")
+		isBookedValue = rsOrder.GetInt("is_booked")
+		prepaidValue = isPaidValue
+		bookingValue = isBookedValue
+	Else
+		If HasColumn("orders", "booking") Then bookingValue = rsOrder.GetInt("booking")
+		If HasColumn("orders", "prepaid") Then prepaidValue = rsOrder.GetInt("prepaid")
+	End If
 
 	Dim customerCode As String = "0"
 	If HasColumn("orders", "customer_code") Then customerCode = rsOrder.GetString("customer_code")
@@ -1324,6 +1372,9 @@ Private Sub BuildOrderSyncPayload(rsOrder As ResultSet) As String
 	orderHeader.Put("transaction_number", rsOrder.GetString("transaction_number"))
 	orderHeader.Put("device_id", rsOrder.GetString("device_id"))
 	orderHeader.Put("prepaid", prepaidValue)
+	orderHeader.Put("is_paid", isPaidValue)
+	orderHeader.Put("is_received", isReceivedValue)
+	orderHeader.Put("is_booked", isBookedValue)
 
 	Dim details As List
 	details.Initialize
@@ -1399,7 +1450,41 @@ Private Sub ShowFetchErrorMessage(errorMessage As String)
 	lblFetchStatus.TextColor = Colors.Red
 End Sub
 
+Private Sub BuildOrderStatusDisplay(isPaid As Boolean, isReceived As Boolean, isBooked As Boolean) As String
+	Dim parts As List
+	parts.Initialize
+	If isPaid Then parts.Add("Paid") Else parts.Add("Unpaid")
+	If isReceived Then parts.Add("Received")
+	If isBooked Then parts.Add("Booked")
+	Dim result As String = ""
+	For i = 0 To parts.Size - 1
+		If i > 0 Then result = result & ", "
+		result = result & parts.Get(i)
+	Next
+	Return result
+End Sub
+
 Private Sub GetOrderDisplayStatus(orderID As Int, fallbackStatus As String) As String
+	' Try reading boolean columns first
+	Try
+		If HasColumn("orders", "is_paid") Then
+			Dim rsStatus As ResultSet = Main.SQLProducts.ExecQuery2( _
+				"SELECT is_paid, is_received, is_booked FROM orders WHERE order_id = ?", _
+				Array As String(orderID))
+			If rsStatus.NextRow Then
+				Dim result As String = BuildOrderStatusDisplay( _
+					rsStatus.GetInt("is_paid") = 1, _
+					rsStatus.GetInt("is_received") = 1, _
+					rsStatus.GetInt("is_booked") = 1)
+				rsStatus.Close
+				If result <> "" Then Return result
+			End If
+			rsStatus.Close
+		End If
+	Catch
+		Log("GetOrderDisplayStatus boolean path error: " & LastException.Message)
+	End Try
+
 	If fallbackStatus <> "" And fallbackStatus <> "Pending" Then
 		Return fallbackStatus
 	End If

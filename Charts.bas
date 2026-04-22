@@ -95,9 +95,15 @@ End Sub
 '	Next
 '	BD.Target.Invalidate
 'End Sub
+
 '
 'Draws the graph layout (Not including the data)
 'This method Is used by Bars And Lines charts
+
+
+'Draws the graph layout (not including the data)
+''This method is used by Bars and Lines charts
+'>>>>>>> origin/Main
 'Sub drawGraph (G As Graph, Canvas As Canvas, Target As View, Points As List, Bars As Boolean, BarsWidth As Int)
 '	Dim GI As GraphInternal
 '	G.GI = GI
@@ -228,6 +234,10 @@ End Sub
 '	End If
 '	LD.Target.Invalidate
 'End Sub
+
+
+
+'
 
 'Sub calcPointToPixel(py As Float, G As Graph) As Int
 '	If G.YStart < 0 And G.YEnd > 0 Then
