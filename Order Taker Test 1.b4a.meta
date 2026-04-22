@@ -25,6 +25,6 @@ ModuleClosedNodes5=
 ModuleClosedNodes6=
 ModuleClosedNodes7=
 ModuleClosedNodes8=
-NavigationStack=SupervisorSyncedOrders,ShowOrderDetails,197,0,SupervisorSyncedOrders,Globals,16,1,SupervisorSyncedOrders,lblBack_Click,247,0,SupervisorSyncedOrders,GetDoubleValue,249,0,SupervisorOrderTakerSelection,Globals,14,0,SupervisorOrderTakerSelection,clvOrderTakers_ItemClick,322,0,SupervisorOrderTakerSelection,ShowConfirmPanel,323,0,SupervisorOrderTakerSelection,bttnProceed_Click,308,0,SupervisorOrderTakerSelection,HideConfirmPanel,340,1,Main,Process_Globals,35,0
+NavigationStack=OrderTakerDashboard,HasColumn,224,0,SupervisorOrderTakerSelection,bttnProceed_Click,307,0,OrderTakerDashboard,DrawPieChartLegend,2118,0,Main,SetupLoginDatabase,93,0,Main,Process_Globals,31,0,OrderTakerDashboard,DrawOrderStatusPieChart,2021,0,OrderTakerDashboard,bttnFetchProducts_Click,785,0,OrderTakerDashboard,SyncNextPendingOrder,1281,0,addOrderActivity,RefreshCartDisplay,713,0,addOrderActivity,SaveOrderToLocalDatabase,765,0,addOrderActivity,GetBookingFromFulfillmentStatus,776,0
 SelectedBuild=0
 VisibleModules=1,2,3,4,5,7,8

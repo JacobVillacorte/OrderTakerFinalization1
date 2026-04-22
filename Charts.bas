@@ -17,7 +17,7 @@ Sub Process_Globals
 	Type BarData (Points As List, BarsColors As List, Target As Panel, Canvas As Canvas, Stacked As Boolean, BarsWidth As Int)
 End Sub
 
-#Region Bar chart methods
+'#Region Bar chart methods
 'Sub AddBarPoint (BD As BarData, X As String, YArray() As Float)
 '	If BD.Points.IsInitialized = False Then
 '		BD.Points.Initialize
@@ -35,7 +35,7 @@ End Sub
 '	b.ShowTick = True
 '	BD.Points.Add(b)
 'End Sub
-
+'
 'Sub AddBarColor(BD As BarData, Color As Int)
 '	If BD.BarsColors.IsInitialized = False Then BD.BarsColors.Initialize
 '	BD.BarsColors.Add(Color)
@@ -96,8 +96,14 @@ End Sub
 '	BD.Target.Invalidate
 'End Sub
 
+'
+'Draws the graph layout (Not including the data)
+'This method Is used by Bars And Lines charts
+
+
 'Draws the graph layout (not including the data)
 ''This method is used by Bars and Lines charts
+'>>>>>>> origin/Main
 'Sub drawGraph (G As Graph, Canvas As Canvas, Target As View, Points As List, Bars As Boolean, BarsWidth As Int)
 '	Dim GI As GraphInternal
 '	G.GI = GI
@@ -163,7 +169,7 @@ End Sub
 'End Sub
 #End Region
 
-#Region Line charts related methods
+'#Region Line charts related methods
 'Sub AddLinePoint (LD As LineData, X As String, Y As Float, ShowTick As Boolean)
 '	If LD.Points.IsInitialized = False Then LD.Points.Initialize
 '	Dim p As LinePoint
@@ -173,7 +179,7 @@ End Sub
 '	p.ShowTick = ShowTick
 '	LD.Points.Add(p)
 'End Sub
-
+'
 'Sub AddLineMultiplePoints(LD As LineData, X As String, YArray() As Float, ShowTick As Boolean)
 '	If LD.Points.IsInitialized = False Then LD.Points.Initialize
 '	Dim p As LinePoint
@@ -183,7 +189,7 @@ End Sub
 '	p.ShowTick = ShowTick
 '	LD.Points.Add(p)
 'End Sub
-
+'
 'Sub AddLineColor(LD As LineData, Color As Int)
 '	If LD.LinesColors.IsInitialized = False Then LD.LinesColors.Initialize
 '	LD.LinesColors.Add(Color)
@@ -228,7 +234,11 @@ End Sub
 '	End If
 '	LD.Target.Invalidate
 'End Sub
+
+
+
 '
+
 'Sub calcPointToPixel(py As Float, G As Graph) As Int
 '	If G.YStart < 0 And G.YEnd > 0 Then
 '		Return G.GI.zeroY - (G.GI.originY - G.GI.maxY) * py / (G.YEnd - G.YStart)
