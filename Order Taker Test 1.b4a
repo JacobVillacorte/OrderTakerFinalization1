@@ -7,6 +7,7 @@ File5=loginTest1.db
 File6=main.bal
 File7=OrderTakerDashboard.bal
 File8=SupervisorOrderTakerSelection.bal
+File9=SupervisorSyncedOrders.bal
 FileGroup1=Default Group
 FileGroup2=Default Group
 FileGroup3=Default Group
@@ -15,6 +16,7 @@ FileGroup5=Default Group
 FileGroup6=Default Group
 FileGroup7=Default Group
 FileGroup8=Default Group
+FileGroup9=Default Group
 Group=Default Group
 Library1=core
 Library2=json
@@ -32,9 +34,10 @@ Module4=forgotPass
 Module5=OrderTakerDashboard
 Module6=Starter
 Module7=SupervisorOrderTakerSelection
-NumberOfFiles=8
+Module8=SupervisorSyncedOrders
+NumberOfFiles=9
 NumberOfLibraries=8
-NumberOfModules=7
+NumberOfModules=8
 Version=13.4
 @EndOfDesignText@
 #Region  Project Attributes 
@@ -68,10 +71,6 @@ Sub Process_Globals
 	Public LoggedInConventionID As Int = 5
 	Public LoggedInRequiresVendorSelection As Boolean
 	Public AssignedVendors As List
-	Public IsSupervisorMode As Boolean
-	Public SupervisorUserID As Int
-	Public SupervisorLoginName As String
-	Public SupervisorFullName As String
 	Public SelectedOrderTakerUserID As Int
 	Public SelectedOrderTakerLoginName As String
 	Public SelectedOrderTakerFullName As String
@@ -88,7 +87,7 @@ Sub Process_Globals
 	Public COPY_ORDER_SOURCE_ID As Int = 0
 
 	' API base URL (important: base path only, not specific endpoint)
-	Public API_URL As String = "http://192.168.8.224/ordertaker_api/"
+	Public API_URL As String = "http://192.168.8.225/ordertaker_api/"
 	Public ITEMS_LAST_SYNC As Long = 0
 
 	Private xui As XUI
@@ -213,11 +212,7 @@ Private Sub bttnLogin_Click
 	If j.Success = False Then
 		If TryOfflineLogin(username, password) Then
 			ToastMessageShow("Offline login mode.", False)
-			If LoggedInGroupID = 11 Or IsSupervisorMode Then
-				StartActivity(SupervisorOrderTakerSelection)
-			Else
-				StartActivity(OrderTakerDashboard)
-			End If
+			StartActivity(OrderTakerDashboard)
 			Activity.Finish
 		Else
 			ToastMessageShow("Cannot reach server and no offline login found.", True)
@@ -248,10 +243,6 @@ Private Sub bttnLogin_Click
 		LoggedInUserID = data.Get("user_id")
 		LoggedInUserFullName = data.Get("full_name")
 		LoggedInGroupID = data.Get("group_id")
-		IsSupervisorMode = False
-		SupervisorUserID = 0
-		SupervisorLoginName = ""
-		SupervisorFullName = ""
 		SelectedOrderTakerUserID = 0
 		SelectedOrderTakerLoginName = ""
 		SelectedOrderTakerFullName = ""
@@ -291,15 +282,13 @@ Private Sub bttnLogin_Click
 			Return
 		End If
 
-		SaveOfflineLoginCache(username, password, LoggedInUserID, LoggedInUserFullName, LoggedInGroupID, VENDOR_ID, LoggedInConventionID)
+		If LoggedInGroupID <> 11 Then
+			SaveOfflineLoginCache(username, password, LoggedInUserID, LoggedInUserFullName, LoggedInGroupID, VENDOR_ID, LoggedInConventionID)
+		End If
 		HandleUserSwitchCacheReset(LoggedInUserID)
 
 		ToastMessageShow("Login Successful!", False)
 		If LoggedInGroupID = 11 Then
-			IsSupervisorMode = True
-			SupervisorUserID = LoggedInUserID
-			SupervisorLoginName = LoggedInUser
-			SupervisorFullName = LoggedInUserFullName
 			StartActivity(SupervisorOrderTakerSelection)
 		Else
 			StartActivity(OrderTakerDashboard)
@@ -322,7 +311,7 @@ End Sub
 Private Sub TryOfflineLogin(loginName As String, plainPassword As String) As Boolean
 	Try
 		Dim rs As ResultSet = SQLLogin.ExecQuery2( _
-		"SELECT * FROM offline_login_cache WHERE login_name = ? AND password = ? AND group_id IN (4, 11)", _
+		"SELECT * FROM offline_login_cache WHERE login_name = ? AND password = ? AND group_id IN (4)", _
             Array As String(loginName, plainPassword))
 
 		If rs.RowCount = 0 Then
@@ -339,10 +328,6 @@ Private Sub TryOfflineLogin(loginName As String, plainPassword As String) As Boo
 		VENDOR_ID = rs.GetInt("vendor_id")
 		LoggedInRequiresVendorSelection = False
 		AssignedVendors.Initialize
-		IsSupervisorMode = False
-		SupervisorUserID = 0
-		SupervisorLoginName = ""
-		SupervisorFullName = ""
 		SelectedOrderTakerUserID = 0
 		SelectedOrderTakerLoginName = ""
 		SelectedOrderTakerFullName = ""
@@ -352,7 +337,8 @@ Private Sub TryOfflineLogin(loginName As String, plainPassword As String) As Boo
 		SelectedOrderTakerAssignedVendors.Initialize
 		rs.Close
 
-		If LoggedInGroupID <> 11 And VENDOR_ID <= 0 Then Return False
+		If LoggedInGroupID = 11 Then Return False
+		If VENDOR_ID <= 0 Then Return False
 
 		HandleUserSwitchCacheReset(LoggedInUserID)
 		Return True

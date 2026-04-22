@@ -69,7 +69,6 @@ Sub Globals
 	Private lblHistoryTotalOrderSync As Label
 	Private lblHistoryTotalAmountSynced As Label
 	Private lblHistoryTotalItemsSynced As Label
-	Private expandedDates As Map
 
 	' Track active HTTP jobs so we can release/cancel them on pause
 	Private currentFetchJob As HttpJob
@@ -88,7 +87,12 @@ End Sub
 
 Sub Activity_Create(FirstTime As Boolean)
 	Activity.LoadLayout("OrderTakerDashboard")
-	SetupDashboardCards
+	
+	' Make font smaller for Total Amount Synced label to fit in space
+	If lblHistoryTotalAmountSynced.IsInitialized Then
+		lblHistoryTotalAmountSynced.TextSize = 15
+	End If
+	
 
 	Dim displayName As String = Main.LoggedInUser
 	If Main.LoggedInUserFullName <> "" Then
@@ -96,7 +100,6 @@ Sub Activity_Create(FirstTime As Boolean)
 	End If
 	lblLoggedInUser.Text = "Welcome, " & displayName
 
-	expandedDates.Initialize
 	SetupOrdersDatabaseTables
 	SetupOrdersPagination
 	SetupHistoryPagination
@@ -915,194 +918,142 @@ Private Sub LoadHistoryIntoCustomListView
 	clvContentHistory.Clear
 	If pnlContentHistoryPagination.IsInitialized Then pnlContentHistoryPagination.Visible = True
 
-	Dim rowW As Int = clvContentHistory.AsView.Width
-	If rowW <= 0 Then rowW = 100%x
-
-	' Query distinct sync dates with summary (paginated)
-	Dim totalDateGroups As Int = GetHistoryDateGroupCount
-	totalHistoryPages = Ceil(totalDateGroups / HISTORY_PAGE_SIZE)
+	Dim totalHistoryOrders As Int = GetHistoryCount
+	totalHistoryPages = Ceil(totalHistoryOrders / HISTORY_PAGE_SIZE)
 	If totalHistoryPages < 1 Then totalHistoryPages = 1
 	If currentHistoryPage < 1 Then currentHistoryPage = 1
 	If currentHistoryPage > totalHistoryPages Then currentHistoryPage = totalHistoryPages
 
+	Dim sql As String = "SELECT * FROM orders WHERE vendor_id = ? AND user_id = ? AND IFNULL(sync_status, '') = 'Synced' ORDER BY synced_at DESC LIMIT ? OFFSET ?"
+	Dim rsOrders As ResultSet = Main.SQLProducts.ExecQuery2(sql, GetHistoryArgs(True))
+
 	RefreshHistoryPaginationBar
 
-	Dim dateOffset As Int = (currentHistoryPage - 1) * HISTORY_PAGE_SIZE
-	Dim rsGroups As ResultSet = Main.SQLProducts.ExecQuery2( _
-		"SELECT DATE(date_created / 1000, 'unixepoch', 'localtime') AS order_date, " & _
-		"MIN(date_created) AS first_tick, " & _
-		"COUNT(*) AS order_count, " & _
-		"IFNULL(SUM(total_amount), 0) AS date_total " & _
-		"FROM orders " & _
-		"WHERE vendor_id = ? AND user_id = ? AND IFNULL(sync_status, '') = 'Synced' " & _
-		"GROUP BY order_date ORDER BY order_date DESC " & _
-		"LIMIT ? OFFSET ?", _
-		Array As String(Main.VENDOR_ID, Main.LoggedInUserID, HISTORY_PAGE_SIZE, dateOffset))
+	If rsOrders.RowCount = 0 Then
+		rsOrders.Close
 
-	If rsGroups.RowCount = 0 Then
-		rsGroups.Close
 		Dim pnlEmpty As Panel
 		pnlEmpty.Initialize("")
 		pnlEmpty.Color = Colors.Transparent
+
 		Dim lblEmpty As Label
 		lblEmpty.Initialize("")
 		lblEmpty.Text = "No synced orders yet."
 		lblEmpty.TextSize = 16
 		lblEmpty.TextColor = Colors.Gray
 		lblEmpty.Gravity = Gravity.CENTER
-		pnlEmpty.AddView(lblEmpty, 0, 0, rowW, 200dip)
+		pnlEmpty.AddView(lblEmpty, 0, 0, clvContentHistory.AsView.Width, 200dip)
+
 		clvContentHistory.Add(pnlEmpty, 200dip)
 		Return
 	End If
 
-	Do While rsGroups.NextRow
-		Dim syncDate As String = rsGroups.GetString("order_date")
-		Dim firstTick As Long = rsGroups.GetLong("first_tick")
-		Dim orderCount As Int = rsGroups.GetInt("order_count")
-		Dim dateTotal As Double = rsGroups.GetDouble("date_total")
-		Dim isExpanded As Boolean = expandedDates.ContainsKey(syncDate)
+	Dim lastDateString As String = ""
 
-		' === Date Group Header Card ===
-		Dim headerH As Int = 62dip
-		Dim pnlHeader As Panel
-		pnlHeader.Initialize("")
-		Dim cdHeader As ColorDrawable
-		cdHeader.Initialize(Colors.White, 10dip)
-		pnlHeader.Background = cdHeader
-		pnlHeader.SetLayout(0, 0, rowW, headerH)
-
-		Dim arrow As String
-		If isExpanded Then arrow = "▲ " Else arrow = "▼ "
-
-		Dim lblDate As Label
-		lblDate.Initialize("")
-		lblDate.Text = FormatDateHeader(firstTick)
-		lblDate.TextSize = 15
-		lblDate.TextColor = Colors.RGB(30, 30, 30)
-		lblDate.Typeface = Typeface.DEFAULT_BOLD
-		lblDate.Gravity = Gravity.LEFT
-		pnlHeader.AddView(lblDate, 14dip, 8dip, rowW - 60dip, 24dip)
-
-		Dim lblArrow As Label
-		lblArrow.Initialize("")
-		lblArrow.Text = arrow
-		lblArrow.TextSize = 14
-		lblArrow.TextColor = Colors.RGB(120, 120, 120)
-		lblArrow.Gravity = Gravity.CENTER
-		pnlHeader.AddView(lblArrow, rowW - 44dip, 8dip, 30dip, 24dip)
-
-		Dim lblSummary As Label
-		lblSummary.Initialize("")
-		lblSummary.Text = orderCount & " Orders  —  ₱" & NumberFormat2(dateTotal, 1, 2, 2, False)
-		lblSummary.TextSize = 12
-		lblSummary.TextColor = Colors.RGB(107, 114, 128)
-		lblSummary.Gravity = Gravity.LEFT
-		pnlHeader.AddView(lblSummary, 14dip, 34dip, rowW - 60dip, 20dip)
-
-		' Tag = "date:" prefix so click handler knows this is a date header
-		clvContentHistory.Add(pnlHeader, "date:" & syncDate)
-
-		' === Expanded: show order rows for this date ===
-		If isExpanded Then
-			Dim rsOrders As ResultSet = Main.SQLProducts.ExecQuery2( _
-				"SELECT * FROM orders " & _
-				"WHERE vendor_id = ? AND user_id = ? AND IFNULL(sync_status, '') = 'Synced' " & _
-				"AND DATE(date_created / 1000, 'unixepoch', 'localtime') = ? " & _
-				"ORDER BY date_created DESC", _
-				Array As String(Main.VENDOR_ID, Main.LoggedInUserID, syncDate))
-
-			Do While rsOrders.NextRow
-				Dim orderId As Int = rsOrders.GetInt("order_id")
-				Dim totalAmount As Double = rsOrders.GetDouble("total_amount")
-				Dim syncStatus As String = rsOrders.GetString("sync_status")
-				Dim displayStatus As String = GetOrderSyncStatusLabel(syncStatus)
-
-				Dim receiptNumber As String = ""
-				If HasColumn("orders", "transaction_number") Then
-					receiptNumber = rsOrders.GetString("transaction_number")
-					If receiptNumber = Null Then receiptNumber = ""
-				End If
-
-				Dim customerName As String = ""
-				If HasColumn("orders", "customer_name") Then
-					customerName = rsOrders.GetString("customer_name")
-					If customerName = Null Then customerName = ""
-				End If
-
-				Dim card As Panel
-				card.Initialize("")
-				card.Color = Colors.RGB(250, 250, 252)
-				card.SetLayout(0, 0, rowW, 100dip)
-
-				Dim lblTitle As Label
-				lblTitle.Initialize("")
-				lblTitle.Text = "Order #" & orderId
-				lblTitle.TextSize = 15
-				lblTitle.TextColor = Colors.Black
-				lblTitle.Typeface = Typeface.DEFAULT_BOLD
-				card.AddView(lblTitle, 24dip, 8dip, rowW * 0.55, 22dip)
-
-				Dim lblTransaction As Label
-				lblTransaction.Initialize("")
-				lblTransaction.Text = "Transaction: " & receiptNumber
-				lblTransaction.TextSize = 11
-				lblTransaction.TextColor = Colors.Gray
-				card.AddView(lblTransaction, 24dip, 30dip, rowW * 0.75, 16dip)
-
-				Dim lblCustomer As Label
-				lblCustomer.Initialize("")
-				lblCustomer.Text = "Customer: " & customerName
-				lblCustomer.TextSize = 11
-				lblCustomer.TextColor = Colors.RGB(33, 150, 243)
-				card.AddView(lblCustomer, 24dip, 48dip, rowW * 0.75, 16dip)
-
-				Dim lblAmount As Label
-				lblAmount.Initialize("")
-				lblAmount.Text = "Total: ₱" & NumberFormat2(totalAmount, 1, 2, 2, False)
-				lblAmount.TextSize = 13
-				lblAmount.TextColor = Colors.RGB(0, 122, 0)
-				card.AddView(lblAmount, 24dip, 68dip, rowW * 0.6, 20dip)
-
-				Dim lblStatus As Label
-				lblStatus.Initialize("")
-				lblStatus.Text = displayStatus
-				lblStatus.TextSize = 11
-				lblStatus.TextColor = Colors.White
-				Dim cdStatus As ColorDrawable
-				cdStatus.Initialize(GetOrderSyncStatusColor(syncStatus), 4dip)
-				lblStatus.Background = cdStatus
-				lblStatus.Gravity = Gravity.CENTER
-				card.AddView(lblStatus, rowW - 100dip, 10dip, 70dip, 22dip)
-
-				' Left indent line to show nesting
-				Dim pnlIndent As Panel
-				pnlIndent.Initialize("")
-				pnlIndent.Color = Colors.RGB(33, 150, 243)
-				card.AddView(pnlIndent, 10dip, 6dip, 3dip, 88dip)
-
-				' Tag = "order:" prefix + order ID
-				clvContentHistory.Add(card, "order:" & orderId)
-			Loop
-			rsOrders.Close
+	Do While rsOrders.NextRow
+		' Get the sync date
+		Dim syncDateTicks As Long = 0
+		Try
+			syncDateTicks = rsOrders.GetLong("synced_at")
+		Catch
+			syncDateTicks = 0
+		End Try
+		
+		Dim currentDateString As String = DateTime.Date(syncDateTicks)
+		
+		' If date changed, add a date header
+		If currentDateString <> lastDateString Then
+			lastDateString = currentDateString
+			
+			' Create date header panel
+			Dim pnlHeader As Panel
+			pnlHeader.Initialize("")
+			pnlHeader.SetLayout(0, 0, clvContentHistory.AsView.Width, 40dip)
+			pnlHeader.Color = Colors.RGB(240, 240, 240)
+			
+			Dim lblDateHeader As Label
+			lblDateHeader.Initialize("")
+			lblDateHeader.Text = FormatDateHeader(syncDateTicks)
+			lblDateHeader.TextSize = 14
+			lblDateHeader.TextColor = Colors.RGB(66, 66, 66)
+			lblDateHeader.Typeface = Typeface.DEFAULT_BOLD
+			lblDateHeader.Gravity = Gravity.LEFT
+			pnlHeader.AddView(lblDateHeader, 10dip, 8dip, clvContentHistory.AsView.Width - 20dip, 24dip)
+			
+			clvContentHistory.Add(pnlHeader, -1)
 		End If
+
+		Dim orderId As Int = rsOrders.GetInt("order_id")
+		Dim totalAmount As Double = rsOrders.GetDouble("total_amount")
+		Dim syncStatus As String = rsOrders.GetString("sync_status")
+		Dim displayStatus As String = GetOrderSyncStatusLabel(syncStatus)
+
+		Dim receiptNumber As String = ""
+		If HasColumn("orders", "transaction_number") Then
+			receiptNumber = rsOrders.GetString("transaction_number")
+			If receiptNumber = Null Then receiptNumber = ""
+		End If
+
+		Dim customerName As String = ""
+		If HasColumn("orders", "customer_name") Then
+			customerName = rsOrders.GetString("customer_name")
+			If customerName = Null Then customerName = ""
+		End If
+
+		Dim card As Panel
+		card.Initialize("")
+		card.Color = Colors.White
+
+		Dim rowWidth As Int = clvContentHistory.AsView.Width
+		If rowWidth <= 0 Then rowWidth = 100%x
+		card.SetLayout(0, 0, rowWidth - 20dip, 110dip)
+
+		Dim lblTitle As Label
+		lblTitle.Initialize("")
+		lblTitle.Text = "Order #" & orderId
+		lblTitle.TextSize = 16
+		lblTitle.TextColor = Colors.Black
+		lblTitle.Typeface = Typeface.DEFAULT_BOLD
+		card.AddView(lblTitle, 10dip, 8dip, card.Width * 0.6, 24dip)
+
+		Dim lblTransaction As Label
+		lblTransaction.Initialize("")
+		lblTransaction.Text = "Transaction: " & receiptNumber
+		lblTransaction.TextSize = 12
+		lblTransaction.TextColor = Colors.Gray
+		card.AddView(lblTransaction, 10dip, 34dip, card.Width * 0.8, 18dip)
+
+		Dim lblCustomer As Label
+		lblCustomer.Initialize("")
+		lblCustomer.Text = "Customer: " & customerName
+		lblCustomer.TextSize = 12
+		lblCustomer.TextColor = Colors.RGB(33, 150, 243)
+		card.AddView(lblCustomer, 10dip, 54dip, card.Width * 0.8, 18dip)
+
+		Dim lblAmount As Label
+		lblAmount.Initialize("")
+		lblAmount.Text = "Total Amount: ₱" & NumberFormat2(totalAmount, 1, 2, 2, False)
+		lblAmount.TextSize = 14
+		lblAmount.TextColor = Colors.RGB(0, 122, 0)
+		card.AddView(lblAmount, 10dip, 76dip, card.Width * 0.8, 18dip)
+
+		Dim lblStatus As Label
+		lblStatus.Initialize("")
+		lblStatus.Text = displayStatus
+		lblStatus.TextColor = Colors.White
+		lblStatus.Color = GetOrderSyncStatusColor(syncStatus)
+		lblStatus.Gravity = Gravity.CENTER
+		card.AddView(lblStatus, card.Width - 90dip, 8dip, 74dip, 24dip)
+
+		clvContentHistory.Add(card, orderId)
 	Loop
-	rsGroups.Close
+
+	rsOrders.Close
 End Sub
 
 Private Sub clvContentHistory_ItemClick(Index As Int, Value As Object)
-	Dim tag As String = Value
-	If tag.StartsWith("date:") Then
-		Dim syncDate As String = tag.SubString("date:".Length)
-		If expandedDates.ContainsKey(syncDate) Then
-			expandedDates.Remove(syncDate)
-		Else
-			expandedDates.Put(syncDate, True)
-		End If
-		LoadHistoryIntoCustomListView
-	Else If tag.StartsWith("order:") Then
-		Dim orderID As Int = tag.SubString("order:".Length)
-		ShowOrderDetails(orderID)
-	End If
+	Dim orderID As Int = Value
+	ShowOrderDetails(orderID)
 End Sub
 
 Private Sub SetupHistoryPagination
@@ -1148,15 +1099,22 @@ Private Sub RefreshHistoryPaginationBar
 	bttnHistoryNext.Enabled = currentHistoryPage < totalHistoryPages
 End Sub
 
-Private Sub GetHistoryDateGroupCount As Int
+Private Sub GetHistoryCount As Int
 	Dim rs As ResultSet = Main.SQLProducts.ExecQuery2( _
-		"SELECT COUNT(DISTINCT DATE(date_created / 1000, 'unixepoch', 'localtime')) AS total " & _
-		"FROM orders WHERE vendor_id = ? AND user_id = ? AND IFNULL(sync_status, '') = 'Synced'", _
+		"SELECT COUNT(*) AS total FROM orders WHERE vendor_id = ? AND user_id = ? AND IFNULL(sync_status, '') = 'Synced'", _
 		Array As String(Main.VENDOR_ID, Main.LoggedInUserID))
 	Dim total As Int = 0
 	If rs.NextRow Then total = rs.GetInt("total")
 	rs.Close
 	Return total
+End Sub
+
+Private Sub GetHistoryArgs(includePaging As Boolean) As String()
+	If includePaging = False Then
+		Return Array As String(Main.VENDOR_ID, Main.LoggedInUserID)
+	Else
+		Return Array As String(Main.VENDOR_ID, Main.LoggedInUserID, HISTORY_PAGE_SIZE, (currentHistoryPage - 1) * HISTORY_PAGE_SIZE)
+	End If
 End Sub
 
 Private Sub bttnHistoryPrev_Click
@@ -1234,8 +1192,6 @@ Private Sub SyncNextPendingOrder
 		syncOrdersCompletedCount = 0
 		LoadOrdersIntoList
 		UpdateDashboardStatusLabels
-		DrawWeeklySalesChart
-		DrawOrderStatusPieChart
 		Return
 	End If
 
@@ -1262,8 +1218,6 @@ Private Sub SyncNextPendingOrder
 				LoadOrdersIntoList
 				LoadHistoryIntoCustomListView
 				UpdateDashboardStatusLabels
-				DrawWeeklySalesChart
-				DrawOrderStatusPieChart
 				jobSync.Release
 				currentSyncJob = Null
 				SyncNextPendingOrder
@@ -1559,12 +1513,12 @@ Private Sub UpdateDashboardSummaryLabels
 	rs = Main.SQLProducts.ExecQuery2( _
 			"SELECT COUNT(*) AS total_orders, IFNULL(SUM(total_amount), 0) AS total_sales " & _
 			"FROM orders " & _
-			"WHERE vendor_id = ? AND user_id = ? AND date_created >= ? AND date_created < ? AND IFNULL(sync_status, '') = 'Synced'", _
+			"WHERE vendor_id = ? AND user_id = ? AND date_created >= ? AND date_created < ?", _
 			Array As String(Main.VENDOR_ID, Main.LoggedInUserID, todayStart, todayEnd))
 
 	If rs.NextRow Then
-		lblTodaysOrders.Text = "Today's Orders" & CRLF & rs.GetInt("total_orders")
-		lblTodaySales.Text = "Today's Sales" & CRLF & "₱" & NumberFormat2(rs.GetDouble("total_sales"), 1, 2, 2, False)
+		lblTodaysOrders.Text = "Today's Orders: " & rs.GetInt("total_orders")
+		lblTodaySales.Text = "Today's Sales: ₱" & NumberFormat2(rs.GetDouble("total_sales"), 1, 2, 2, False)
 	End If
 	rs.Close
 
@@ -1574,13 +1528,7 @@ Private Sub UpdateDashboardSummaryLabels
 			"WHERE IFNULL(sync_status, '') NOT IN ('Synced', 'Cancelled')")
 
 	If rs.NextRow Then
-		Dim pendingCount As Int = rs.GetInt("pending_count")
-		lblPendingSync.Text = "Pending Sync" & CRLF & pendingCount
-		If pendingCount > 0 Then
-			lblPendingSync.TextColor = Colors.RGB(234, 88, 12)
-		Else
-			lblPendingSync.TextColor = Colors.RGB(22, 163, 74)
-		End If
+		lblPendingSync.Text = "Pending Sync: " & rs.GetInt("pending_count")
 	End If
 	rs.Close
 
@@ -1601,7 +1549,7 @@ Private Sub UpdateDashboardSummaryLabels
 			
 			' Always try to set the text, initialize if needed
 			Try
-				lblHistoryTotalOrderSync.Text = "Total Orders" & CRLF & "Synced: " & totalSyncedOrders
+				lblHistoryTotalOrderSync.Text = "Total Orders Synced: " & totalSyncedOrders
 				Log("DEBUG: Set lblHistoryTotalOrderSync to: " & lblHistoryTotalOrderSync.Text)
 			Catch
 				Log("DEBUG: Failed to set lblHistoryTotalOrderSync: " & LastException.Message)
@@ -1609,7 +1557,7 @@ Private Sub UpdateDashboardSummaryLabels
 			
 			Try
 				Dim formattedAmount As String = NumberFormat2(totalSyncedAmount, 1, 2, 2, False)
-				lblHistoryTotalAmountSynced.Text = "Total Amount" & CRLF & "Synced: ₱" & formattedAmount
+				lblHistoryTotalAmountSynced.Text = "Total Amount Synced: ₱" & formattedAmount
 				Log("DEBUG: Set lblHistoryTotalAmountSynced to: " & lblHistoryTotalAmountSynced.Text)
 			Catch
 				Log("DEBUG: Failed to set lblHistoryTotalAmountSynced: " & LastException.Message)
@@ -1617,7 +1565,7 @@ Private Sub UpdateDashboardSummaryLabels
 			End Try
 			
 			Try
-				lblHistoryTotalItemsSynced.Text = "Total Items" & CRLF & "Synced: " & totalSyncedItems
+				lblHistoryTotalItemsSynced.Text = "Total Items Synced: " & totalSyncedItems
 				Log("DEBUG: Set lblHistoryTotalItemsSynced to: " & lblHistoryTotalItemsSynced.Text)
 			Catch
 				Log("DEBUG: Failed to set lblHistoryTotalItemsSynced: " & LastException.Message)
@@ -1628,175 +1576,6 @@ Private Sub UpdateDashboardSummaryLabels
 		Log("UpdateDashboardSummaryLabels error: " & LastException.Message)
 		If rsSummary.IsInitialized Then rsSummary.Close
 	End Try
-End Sub
-
-' ======================
-' DASHBOARD TAB - CARD LAYOUT
-' ======================
-
-Private Sub SetupDashboardCards
-	pnlContentDash.Color = Colors.RGB(241, 245, 249)
-
-	Dim M As Int = 12dip
-	Dim W As Int = pnlContentDash.Width - (M * 2)
-	Dim S As Int = 6dip
-	Dim R As Float = 12dip
-	Dim P As Int = 14dip
-
-	Dim statusH As Int = 68dip
-	Dim statsH As Int = 60dip
-	Dim totalsH As Int = 36dip
-	Dim buttonsH As Int = 100dip
-	Dim totalFixed As Int = statusH + statsH + totalsH + buttonsH + (S * 7)
-	Dim chartAreaH As Int = pnlContentDash.Height - totalFixed
-	Dim lineChartH As Int = chartAreaH * 2 / 5
-	Dim pieChartH As Int = chartAreaH - lineChartH
-
-	Dim Y As Int = S
-
-	' === Card 1: Status Info ===
-	AddCardToPanel(pnlContentDash, M, Y, W, statusH, R)
-
-	lblCacheInfo.TextSize = 14
-	lblCacheInfo.Gravity = Gravity.LEFT
-	lblCacheInfo.SetLayout(M + P, Y + 8dip, W - (P * 2), 26dip)
-	lblCacheInfo.BringToFront
-
-	lblFetchStatus.TextSize = 14
-	lblFetchStatus.Gravity = Gravity.LEFT
-	lblFetchStatus.SetLayout(M + P, Y + 36dip, W - (P * 2), 26dip)
-	lblFetchStatus.BringToFront
-
-	Y = Y + statusH + S
-
-	' === Card 2: Stats Row (3 columns) ===
-	AddCardToPanel(pnlContentDash, M, Y, W, statsH, R)
-
-	Dim colW As Int = W / 3
-
-	lblTodaysOrders.Gravity = Gravity.CENTER
-	lblTodaysOrders.TextSize = 12
-	lblTodaysOrders.TextColor = Colors.RGB(55, 65, 81)
-	lblTodaysOrders.SetLayout(M, Y + 4dip, colW, statsH - 8dip)
-	lblTodaysOrders.BringToFront
-
-	lblTodaySales.Gravity = Gravity.CENTER
-	lblTodaySales.TextSize = 12
-	lblTodaySales.TextColor = Colors.RGB(55, 65, 81)
-	lblTodaySales.SetLayout(M + colW, Y + 4dip, colW, statsH - 8dip)
-	lblTodaySales.BringToFront
-
-	lblPendingSync.Gravity = Gravity.CENTER
-	lblPendingSync.TextSize = 12
-	lblPendingSync.TextColor = Colors.RGB(55, 65, 81)
-	lblPendingSync.SetLayout(M + (colW * 2), Y + 4dip, colW, statsH - 8dip)
-	lblPendingSync.BringToFront
-
-	Dim div1 As Panel : div1.Initialize("")
-	div1.Color = Colors.RGB(229, 231, 235)
-	pnlContentDash.AddView(div1, M + colW, Y + 12dip, 1dip, statsH - 24dip)
-	
-	Dim div2 As Panel : div2.Initialize("")
-	div2.Color = Colors.RGB(229, 231, 235)
-	pnlContentDash.AddView(div2, M + (colW * 2), Y + 12dip, 1dip, statsH - 24dip)
-	
-	Y = Y + statsH + S
-
-	' === Card 3: Weekly Sales Line Chart ===
-	AddCardToPanel(pnlContentDash, M, Y, W, lineChartH, R)
-
-	If pnllineChart.IsInitialized Then
-		pnllineChart.SetLayout(M + 4dip, Y + 4dip, W - 8dip, lineChartH - 8dip)
-		pnllineChart.BringToFront
-	End If
-
-	Y = Y + lineChartH + S
-
-	' === Card 4: Order Status Pie Chart ===
-	AddCardToPanel(pnlContentDash, M, Y, W, pieChartH, R)
-
-	If pnlPiechart.IsInitialized Then
-		pnlPiechart.SetLayout(M + 4dip, Y + 4dip, W - 8dip, pieChartH - 8dip)
-		pnlPiechart.BringToFront
-	End If
-
-	Y = Y + pieChartH + S
-
-	' === Card 5: Synced Totals Row ===
-	AddCardToPanel(pnlContentDash, M, Y, W, totalsH, R)
-
-	Dim totColW As Int = W / 3
-
-	Try
-		If lblHistoryTotalOrderSync.IsInitialized Then
-			lblHistoryTotalOrderSync.Gravity = Gravity.CENTER
-			lblHistoryTotalOrderSync.TextSize = 11
-			lblHistoryTotalOrderSync.TextColor = Colors.RGB(75, 85, 99)
-			lblHistoryTotalOrderSync.SetLayout(M, Y + 2dip, totColW, totalsH - 4dip)
-			lblHistoryTotalOrderSync.BringToFront
-		End If
-	Catch
-		Log("SetupDashboardCards: lblHistoryTotalOrderSync error")
-	End Try
-
-	Try
-		If lblHistoryTotalAmountSynced.IsInitialized Then
-			lblHistoryTotalAmountSynced.Gravity = Gravity.CENTER
-			lblHistoryTotalAmountSynced.TextSize = 11
-			lblHistoryTotalAmountSynced.TextColor = Colors.RGB(75, 85, 99)
-			lblHistoryTotalAmountSynced.SetLayout(M + totColW, Y + 2dip, totColW, totalsH - 4dip)
-			lblHistoryTotalAmountSynced.BringToFront
-		End If
-	Catch
-		Log("SetupDashboardCards: lblHistoryTotalAmountSynced error")
-	End Try
-
-	Try
-		If lblHistoryTotalItemsSynced.IsInitialized Then
-			lblHistoryTotalItemsSynced.Gravity = Gravity.CENTER
-			lblHistoryTotalItemsSynced.TextSize = 11
-			lblHistoryTotalItemsSynced.TextColor = Colors.RGB(75, 85, 99)
-			lblHistoryTotalItemsSynced.SetLayout(M + (totColW * 2), Y + 2dip, totColW, totalsH - 4dip)
-			lblHistoryTotalItemsSynced.BringToFront
-		End If
-	Catch
-		Log("SetupDashboardCards: lblHistoryTotalItemsSynced error")
-	End Try
-
-	Y = Y + totalsH + S
-
-	' === Card 6: Action Buttons ===
-	AddCardToPanel(pnlContentDash, M, Y, W, buttonsH, R)
-
-	Dim cdFetch As ColorDrawable
-	cdFetch.Initialize(Colors.RGB(33, 150, 243), 8dip)
-	bttnFetchProducts.Background = cdFetch
-	bttnFetchProducts.TextColor = Colors.White
-	bttnFetchProducts.SetLayout(M + P, Y + 10dip, W - (P * 2), 42dip)
-	bttnFetchProducts.BringToFront
-
-	Dim cdSync As ColorDrawable
-	cdSync.Initialize(Colors.RGB(240, 240, 240), 8dip)
-	bttnSyncOrdersNow.Background = cdSync
-	bttnSyncOrdersNow.TextColor = Colors.RGB(55, 65, 81)
-	bttnSyncOrdersNow.SetLayout(M + P, Y + 56dip, W - (P * 2), 42dip)
-	bttnSyncOrdersNow.BringToFront
-End Sub
-
-Private Sub AddCardToPanel(parent As Panel, left As Int, top As Int, width As Int, height As Int, radius As Float)
-	Dim pnlBorder As Panel
-	pnlBorder.Initialize("")
-	Dim cdBorder As ColorDrawable
-	cdBorder.Initialize(Colors.RGB(80, 80, 80), radius)
-	pnlBorder.Background = cdBorder
-	parent.AddView(pnlBorder, left, top, width, height)
-
-	Dim pnlFill As Panel
-	pnlFill.Initialize("")
-	Dim cdFill As ColorDrawable
-	cdFill.Initialize(Colors.White, radius)
-	pnlFill.Background = cdFill
-	pnlBorder.AddView(pnlFill, 1dip, 1dip, width - 2dip, height - 2dip)
 End Sub
 
 'search bar
@@ -1879,54 +1658,60 @@ Private Sub DrawWeeklySalesChart
 	cvs.Initialize(pnllineChart)
 	cvs.DrawColor(Colors.White)
 	
-	' Chart dimensions — leave room for day labels at the bottom
-	Dim chartTop As Int = 28dip
-	Dim chartBottom As Int = pnllineChart.Height - 32dip
-	Dim chartLeft As Int = 50dip
-	Dim chartRight As Int = pnllineChart.Width - 10dip
-	If pnllineChart.Height < 150dip Then
-		chartTop = 22dip
-		chartBottom = pnllineChart.Height - 28dip
-		chartLeft = 44dip
-	End If
+	' Chart dimensions with improved spacing
+	Dim chartTop As Int = 35dip
+	Dim chartBottom As Int = pnllineChart.Height - 60dip
+	Dim chartLeft As Int = 80dip
+	Dim chartRight As Int = pnllineChart.Width - 15dip
 	Dim chartWidth As Int = chartRight - chartLeft
 	Dim chartHeight As Int = chartBottom - chartTop
-
-	' Draw title with currency indicator
-	cvs.DrawText("Weekly Sales Trend (₱)", pnllineChart.Width / 2, 18dip, Typeface.DEFAULT_BOLD, 14, Colors.RGB(0, 102, 204), "CENTER")
-
+	
+	' Draw title
+	cvs.DrawText("Weekly Sales Trend", pnllineChart.Width / 2, 20dip, Typeface.DEFAULT_BOLD, 16, Colors.RGB(0, 102, 204), "CENTER")
+	
 	' Draw axes
-	cvs.DrawLine(chartLeft, chartTop, chartLeft, chartBottom, Colors.RGB(180, 180, 180), 1dip)
-	cvs.DrawLine(chartLeft, chartBottom, chartRight, chartBottom, Colors.RGB(180, 180, 180), 1dip)
-
+	cvs.DrawLine(chartLeft, chartTop, chartLeft, chartBottom, Colors.RGB(100, 100, 100), 2dip)
+	cvs.DrawLine(chartLeft, chartBottom, chartRight, chartBottom, Colors.RGB(100, 100, 100), 2dip)
+	
 	' Draw grid lines and Y-axis labels
-	Dim gridLines As Int = 4
+	Dim gridLines As Int = 5
 	For j = 0 To gridLines
 		Dim yValue As Float = maxSales * (gridLines - j) / gridLines
 		Dim yPixel As Int = chartTop + (j * chartHeight / gridLines)
-
-		cvs.DrawLine(chartLeft, yPixel, chartRight, yPixel, Colors.RGB(230, 230, 230), 1dip)
-
+		
+		' Draw grid line
+		cvs.DrawLine(chartLeft, yPixel, chartRight, yPixel, Colors.RGB(220, 220, 220), 1dip)
+		
+		' Draw Y-axis label
 		Dim labelText As String = NumberFormat(yValue, 1, 0)
-		cvs.DrawText(labelText, chartLeft - 6dip, yPixel + 4dip, Typeface.DEFAULT, 10, Colors.Gray, "RIGHT")
+		cvs.DrawText(labelText, chartLeft - 10dip, yPixel + 5dip, Typeface.DEFAULT, 12, Colors.Gray, "RIGHT")
 	Next
-
-	' Draw data points and lines
-	Dim pointRadius As Int = 4dip
+	
+	' Calculate points and draw line - only for days up to today
+	Dim pointRadius As Int = 5dip
 	For i = 0 To daysToDisplay - 1
-		Dim xPixel As Int = chartLeft + (i * chartWidth / Max(daysToDisplay - 1, 1))
+		Dim xPixel As Int = chartLeft + (i * chartWidth / (daysToDisplay - 1))
 		Dim yPixel As Int = chartBottom - (dailySales(i) / maxSales) * chartHeight
-
+		
+		' Draw data point
 		cvs.DrawCircle(xPixel, yPixel, pointRadius, Colors.RGB(33, 150, 243), True, 0)
-
+		
+		' Draw line to next point (if not last point)
 		If i < daysToDisplay - 1 Then
-			Dim nextXPixel As Int = chartLeft + ((i + 1) * chartWidth / Max(daysToDisplay - 1, 1))
+			Dim nextXPixel As Int = chartLeft + ((i + 1) * chartWidth / (daysToDisplay - 1))
 			Dim nextYPixel As Int = chartBottom - (dailySales(i + 1) / maxSales) * chartHeight
 			cvs.DrawLine(xPixel, yPixel, nextXPixel, nextYPixel, Colors.RGB(33, 150, 243), 2dip)
 		End If
-
-		cvs.DrawText(dayLabels(i), xPixel, chartBottom + 14dip, Typeface.DEFAULT, 10, Colors.Gray, "CENTER")
+		
+		' Draw X-axis label
+		cvs.DrawText(dayLabels(i), xPixel, chartBottom + 15dip, Typeface.DEFAULT, 12, Colors.Gray, "CENTER")
 	Next
+	
+	' Draw Y-axis label
+	cvs.DrawText("Sales (₱)", 10dip, pnllineChart.Height / 2 - 20dip, Typeface.DEFAULT, 12, Colors.Gray, "CENTER")
+	
+	' Draw X-axis label
+	cvs.DrawText("Day", pnllineChart.Width / 2, pnllineChart.Height - 5dip, Typeface.DEFAULT, 12, Colors.Gray, "CENTER")
 	
 	pnllineChart.Invalidate
 End Sub
@@ -2021,32 +1806,26 @@ Private Sub DrawOrderStatusPieChart
 End Sub
 
 Private Sub DrawPieChartLegend(cvs As Canvas, panel As Panel, completed As Int, pending As Int, cancelled As Int)
-	Dim spacing As Int = 24dip
-	Dim boxSize As Int = 13dip
-	Dim textSize As Int = 12
-
-	If panel.Height < 200dip Then
-		spacing = 18dip
-		boxSize = 11dip
-		textSize = 10
-	End If
-
-	Dim legendH As Int = spacing * 3
-	Dim legendStartX As Int = 18dip
-	Dim legendStartY As Int = panel.Height - legendH - 6dip
+	Dim legendStartX As Int = 20dip
+	Dim legendStartY As Int = panel.Height - 100dip
+	Dim boxSize As Int = 15dip
+	Dim spacing As Int = 30dip
 	Dim rect As Rect
-
+	
+	' Draw Completed (Green)
 	rect.Initialize(legendStartX, legendStartY, legendStartX + boxSize, legendStartY + boxSize)
 	cvs.DrawRect(rect, Colors.RGB(76, 175, 80), True, 0)
-	cvs.DrawText("Completed " & completed, legendStartX + boxSize + 8dip, legendStartY + 3dip, Typeface.DEFAULT, textSize, Colors.Black, "LEFT")
-
+	cvs.DrawText("Completed " & completed, legendStartX + boxSize + 8dip, legendStartY + 3dip, Typeface.DEFAULT, 12, Colors.Black, "LEFT")
+	
+	' Draw Pending (Orange)
 	rect.Initialize(legendStartX, legendStartY + spacing, legendStartX + boxSize, legendStartY + spacing + boxSize)
 	cvs.DrawRect(rect, Colors.RGB(255, 152, 0), True, 0)
-	cvs.DrawText("Pending " & pending, legendStartX + boxSize + 8dip, legendStartY + spacing + 3dip, Typeface.DEFAULT, textSize, Colors.Black, "LEFT")
-
+	cvs.DrawText("Pending " & pending, legendStartX + boxSize + 8dip, legendStartY + spacing + 3dip, Typeface.DEFAULT, 12, Colors.Black, "LEFT")
+	
+	' Draw Cancelled (Red)
 	rect.Initialize(legendStartX, legendStartY + spacing * 2, legendStartX + boxSize, legendStartY + spacing * 2 + boxSize)
 	cvs.DrawRect(rect, Colors.RGB(244, 67, 54), True, 0)
-	cvs.DrawText("Cancelled " & cancelled, legendStartX + boxSize + 8dip, legendStartY + spacing * 2 + 3dip, Typeface.DEFAULT, textSize, Colors.Black, "LEFT")
+	cvs.DrawText("Cancelled " & cancelled, legendStartX + boxSize + 8dip, legendStartY + spacing * 2 + 3dip, Typeface.DEFAULT, 12, Colors.Black, "LEFT")
 End Sub
 
 
