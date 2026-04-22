@@ -66,6 +66,12 @@ Sub Globals
 	Private bttnConfirmPurchaseStatus As Button
 	Private bttnCancelPurchaseStatus As Button
 	
+	' Fulfillment toggle state
+	Private IsPaidSelected As Boolean = True
+	Private IsReceivedSelected As Boolean = True
+	Private IsBookedSelected As Boolean = False
+	Private IgnoreRadioChanges As Boolean = False
+	
 	' Delete selection buttons / popup
 	Private btnDeleteSelected As Button
 	Private btnNoDelete As Button
@@ -89,9 +95,7 @@ Sub Activity_Create(FirstTime As Boolean)
 	ApplyPendingCopyOrder
 
 	pnlPurchaseStatus.Visible = False
-	rbPaidReceived.Checked = True
-	rbPaidBooked.Checked = False
-	rbNotPaidBooked.Checked = False
+	InitFulfillmentToggles
 	btnDeleteSelected.Enabled = True
 	btnDeleteSelected.Color = Colors.ARGB(80, 200, 200, 200)
 	PnlConfirmDelete.Visible = False
@@ -233,10 +237,12 @@ Private Sub bttnPurchaseNow_Click
 	pnlPurchaseStatus.Visible = True
 	pnlPurchaseStatus.BringToFront
 
-	' Reset radio buttons
-	rbPaidReceived.Checked = True
-	rbPaidBooked.Checked = False
-	rbNotPaidBooked.Checked = False
+	' Reset toggle states to default (Paid + Received)
+	IsPaidSelected = True
+	IsReceivedSelected = True
+	IsBookedSelected = False
+	UpdateToggleVisuals
+	LayoutPurchaseStatusOptions
 End Sub
 
 Private Sub HidePurchaseStatusPopup
@@ -244,26 +250,89 @@ Private Sub HidePurchaseStatusPopup
 	pnlDim.Visible = False
 End Sub
 
-Private Sub GetSelectedFulfillmentStatus As String
-	If rbPaidReceived.Checked Then
-		Return "Paid-Received"
-	Else If rbPaidBooked.Checked Then
-		Return "Paid-Booked"
-	Else If rbNotPaidBooked.Checked Then
-		Return "NotPaid-Booked"
-	Else
-		Return ""
+' Tighten spacing of the status options inside the popup.
+Private Sub LayoutPurchaseStatusOptions
+	If rbPaidReceived.IsInitialized = False Or rbPaidBooked.IsInitialized = False Or rbNotPaidBooked.IsInitialized = False Then Return
+	If lblPurchaseStatusMessage.IsInitialized = False Or bttnConfirmPurchaseStatus.IsInitialized = False Then Return
+	
+	Dim startY As Int = lblPurchaseStatusMessage.Top + lblPurchaseStatusMessage.Height + 12dip
+	Dim maxBottom As Int = bttnConfirmPurchaseStatus.Top - 10dip
+	Dim available As Int = maxBottom - startY
+	If available <= 0 Then Return
+	
+	Dim optionH As Int = 38dip
+	Dim gap As Int = 8dip
+	Dim needed As Int = (3 * optionH) + (2 * gap)
+	If needed > available Then
+		gap = 4dip
+		optionH = Max(30dip, (available - 2 * gap) / 3)
 	End If
+	
+	rbPaidReceived.Height = optionH
+	rbPaidBooked.Height = optionH
+	rbNotPaidBooked.Height = optionH
+	
+	rbPaidReceived.Top = startY
+	rbPaidBooked.Top = rbPaidReceived.Top + optionH + gap
+	rbNotPaidBooked.Top = rbPaidBooked.Top + optionH + gap
+End Sub
+
+Private Sub GetSelectedCount As Int
+	Dim count As Int = 0
+	If IsPaidSelected Then count = count + 1
+	If IsReceivedSelected Then count = count + 1
+	If IsBookedSelected Then count = count + 1
+	Return count
+End Sub
+
+' Received only: goods received, not paid, not booked (stored as NotPaid-Received).
+Private Sub IsReceivedOnlyFulfillment As Boolean
+	Return IsReceivedSelected And Not(IsPaidSelected) And Not(IsBookedSelected)
+End Sub
+
+Private Sub IsReceivedBookedPaired As Boolean
+	Return IsReceivedSelected And IsBookedSelected
+End Sub
+
+Private Sub IsValidFulfillmentSelection As Boolean
+	If IsReceivedBookedPaired Then Return False
+	If IsReceivedOnlyFulfillment Then Return True
+	If GetSelectedCount = 2 Then Return True
+	Return False
+End Sub
+
+Private Sub GetSelectedFulfillmentStatus As String
+	Dim parts As List
+	parts.Initialize
+	
+	If IsPaidSelected Then
+		parts.Add("Paid")
+	Else
+		parts.Add("NotPaid")
+	End If
+	
+	If IsReceivedSelected Then parts.Add("Received")
+	If IsBookedSelected Then parts.Add("Booked")
+	
+	Dim result As String = ""
+	For i = 0 To parts.Size - 1
+		If i > 0 Then result = result & "-"
+		result = result & parts.Get(i)
+	Next
+	Return result
 End Sub
 
 Private Sub bttnConfirmPurchaseStatus_Click
-	Dim fulfillmentStatus As String = GetSelectedFulfillmentStatus
-
-	If fulfillmentStatus = "" Then
-		ToastMessageShow("Please select a fulfillment status", True)
+	If IsReceivedBookedPaired Then
+		ToastMessageShow("Received and Booked cannot be used together.", True)
+		Return
+	End If
+	If Not(IsValidFulfillmentSelection) Then
+		ToastMessageShow("Pick two options, or only Received (not paid, not booked).", True)
 		Return
 	End If
 
+	Dim fulfillmentStatus As String = GetSelectedFulfillmentStatus
 	SaveOrderToLocalDatabase(fulfillmentStatus)
 	HidePurchaseStatusPopup
 	ClearCartAndResetUI
@@ -275,22 +344,101 @@ Private Sub bttnCancelPurchaseStatus_Click
 	HidePurchaseStatusPopup
 End Sub
 
+Private Sub InitFulfillmentToggles
+	IsPaidSelected = True
+	IsReceivedSelected = True
+	IsBookedSelected = False
+	UpdateToggleVisuals
+End Sub
+
 Private Sub rbPaidReceived_CheckedChange(Checked As Boolean)
-	If Checked = False Then Return
-	rbPaidBooked.Checked = False
-	rbNotPaidBooked.Checked = False
+	If IgnoreRadioChanges Then Return
+	If Not(Checked) Then Return
+	If Not(IsPaidSelected) And GetSelectedCount >= 2 Then
+		ToastMessageShow("Deselect one first", False)
+		IgnoreRadioChanges = True
+		rbPaidReceived.Checked = False
+		IgnoreRadioChanges = False
+		Return
+	End If
+	IsPaidSelected = Not(IsPaidSelected)
+	UpdateToggleVisuals
 End Sub
 
 Private Sub rbPaidBooked_CheckedChange(Checked As Boolean)
-	If Checked = False Then Return
-	rbPaidReceived.Checked = False
-	rbNotPaidBooked.Checked = False
+	If IgnoreRadioChanges Then Return
+	If Not(Checked) Then Return
+	If Not(IsReceivedSelected) And IsBookedSelected Then
+		ToastMessageShow("Received and Booked cannot be used together.", False)
+		IgnoreRadioChanges = True
+		rbPaidBooked.Checked = False
+		IgnoreRadioChanges = False
+		Return
+	End If
+	If Not(IsReceivedSelected) And GetSelectedCount >= 2 Then
+		ToastMessageShow("Deselect one first", False)
+		IgnoreRadioChanges = True
+		rbPaidBooked.Checked = False
+		IgnoreRadioChanges = False
+		Return
+	End If
+	IsReceivedSelected = Not(IsReceivedSelected)
+	UpdateToggleVisuals
 End Sub
 
 Private Sub rbNotPaidBooked_CheckedChange(Checked As Boolean)
-	If Checked = False Then Return
+	If IgnoreRadioChanges Then Return
+	If Not(Checked) Then Return
+	If Not(IsBookedSelected) And IsReceivedSelected Then
+		ToastMessageShow("Received and Booked cannot be used together.", False)
+		IgnoreRadioChanges = True
+		rbNotPaidBooked.Checked = False
+		IgnoreRadioChanges = False
+		Return
+	End If
+	If Not(IsBookedSelected) And GetSelectedCount >= 2 Then
+		ToastMessageShow("Deselect one first", False)
+		IgnoreRadioChanges = True
+		rbNotPaidBooked.Checked = False
+		IgnoreRadioChanges = False
+		Return
+	End If
+	IsBookedSelected = Not(IsBookedSelected)
+	UpdateToggleVisuals
+End Sub
+
+Private Sub UpdateToggleVisuals
+	IgnoreRadioChanges = True
+	
 	rbPaidReceived.Checked = False
 	rbPaidBooked.Checked = False
+	rbNotPaidBooked.Checked = False
+	
+	If IsPaidSelected Then
+		rbPaidReceived.Text = "  ✔ Paid"
+		rbPaidReceived.TextColor = Colors.RGB(0, 128, 0)
+	Else
+		rbPaidReceived.Text = "     Paid"
+		rbPaidReceived.TextColor = Colors.DarkGray
+	End If
+	
+	If IsReceivedSelected Then
+		rbPaidBooked.Text = "  ✔ Received"
+		rbPaidBooked.TextColor = Colors.RGB(0, 128, 0)
+	Else
+		rbPaidBooked.Text = "     Received"
+		rbPaidBooked.TextColor = Colors.DarkGray
+	End If
+	
+	If IsBookedSelected Then
+		rbNotPaidBooked.Text = "  ✔ Booked"
+		rbNotPaidBooked.TextColor = Colors.RGB(0, 128, 0)
+	Else
+		rbNotPaidBooked.Text = "     Booked"
+		rbNotPaidBooked.TextColor = Colors.DarkGray
+	End If
+	
+	IgnoreRadioChanges = False
 End Sub
 
 Private Sub ClearCartAndResetUI
@@ -300,9 +448,10 @@ Private Sub ClearCartAndResetUI
 	bttnPurchaseNow.Color = Colors.ARGB(80, 200, 200, 200)
 	bttnPurchaseNow.Enabled = False
 
-	rbPaidReceived.Checked = True
-	rbPaidBooked.Checked = False
-	rbNotPaidBooked.Checked = False
+	IsPaidSelected = True
+	IsReceivedSelected = True
+	IsBookedSelected = False
+	UpdateToggleVisuals
 	ExitSelectionMode
 End Sub
 
@@ -629,21 +778,21 @@ Private Sub SaveOrderToLocalDatabase(FulfillmentStatus As String)
 End Sub
 
 Private Sub GetBookingFromFulfillmentStatus(FulfillmentStatus As String) As Int
-	If FulfillmentStatus = "Paid-Received" Then
+	If FulfillmentStatus.Contains("Booked") Then
 		Return 1
 	End If
 	Return 0
 End Sub
 
 Private Sub GetPrepaidFromFulfillmentStatus(FulfillmentStatus As String) As Int
-	If FulfillmentStatus = "Paid-Received" Or FulfillmentStatus = "Paid-Booked" Then
+	If FulfillmentStatus.Contains("Paid") And Not(FulfillmentStatus.Contains("NotPaid")) Then
 		Return 1
 	End If
 	Return 0
 End Sub
 
 Private Sub GetPaymentStatusFromFulfillmentStatus(FulfillmentStatus As String) As String
-	If FulfillmentStatus = "Paid-Received" Or FulfillmentStatus = "Paid-Booked" Then
+	If FulfillmentStatus.Contains("Paid") And Not(FulfillmentStatus.Contains("NotPaid")) Then
 		Return "Paid"
 	Else
 		Return "NotPaid"
@@ -651,7 +800,7 @@ Private Sub GetPaymentStatusFromFulfillmentStatus(FulfillmentStatus As String) A
 End Sub
 
 Private Sub GetDeliveryStatusFromFulfillmentStatus(FulfillmentStatus As String) As String
-	If FulfillmentStatus = "Paid-Received" Then
+	If FulfillmentStatus.Contains("Received") Then
 		Return "Received"
 	Else
 		Return "NotReceived"

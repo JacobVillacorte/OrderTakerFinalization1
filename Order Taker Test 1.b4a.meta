@@ -22,6 +22,6 @@ ModuleClosedNodes4=
 ModuleClosedNodes5=
 ModuleClosedNodes6=
 ModuleClosedNodes7=
-NavigationStack=Charts,createLegend,250,0,Charts,calcSlice,288,0,Charts,DrawPie,250,2,Charts,Process_Globals,37,0,Charts,DrawBarsChart,38,0,Charts,DrawLineChart,186,0,Charts,drawGraph,165,0
+NavigationStack=addOrderActivity,btnDeleteSelected_Click,1859,0,addOrderActivity,btnYesDelete_Click,895,0,Charts,Process_Globals,222,0,addOrderActivity,Globals,52,0,addOrderActivity,bttnPurchaseNow_Click,231,0,addOrderActivity,LayoutPurchaseStatusOptions,251,0,addOrderActivity,btnNoDelete_Click,945,0,Visual Designer,addorderactivity.bal,-100,6,addOrderActivity,ExitSelectionMode,866,0,Main,Process_Globals,51,0,Main,Globals,61,0
 SelectedBuild=0
 VisibleModules=1,2,3,4,5,6,7
