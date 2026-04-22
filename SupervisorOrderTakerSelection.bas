@@ -16,6 +16,7 @@ Sub Globals
 	Private pnlWholeSupervisor As Panel
 	Private pnlDim As Panel
 	Private pnlTop As Panel
+	Private lblBack As Label
 	Private lblTitle As Label
 	Private lblSubTitle As Label
 	Private bttnRefresh As Button
@@ -257,6 +258,11 @@ Private Sub bttnRefresh_Click
 	LoadOrderTakers
 End Sub
 
+Private Sub lblBack_Click
+	StartActivity(Main)
+	Activity.Finish
+End Sub
+
 Private Sub pnlDim_Click
 	HideConfirmPanel
 End Sub
@@ -302,16 +308,11 @@ Private Sub bttnProceed_Click
 		Main.SelectedOrderTakerRequiresVendorSelection = (Main.SelectedOrderTakerAssignedVendors.Size > 1)
 	End If
 
-	Main.LoggedInUser = Main.SelectedOrderTakerLoginName
-	Main.LoggedInUserID = Main.SelectedOrderTakerUserID
-	Main.LoggedInUserFullName = Main.SelectedOrderTakerFullName
-	Main.LoggedInGroupID = Main.SelectedOrderTakerGroupID
-	Main.VENDOR_ID = Main.SelectedOrderTakerVendorID
-	Main.LoggedInRequiresVendorSelection = Main.SelectedOrderTakerRequiresVendorSelection
-	Main.IsSupervisorMode = True
+	Main.LoggedInRequiresVendorSelection = False
+	Main.COPY_ORDER_SOURCE_ID = 0
 
 	ToastMessageShow("Viewing " & Main.SelectedOrderTakerFullName, False)
-	StartActivity(OrderTakerDashboard)
+	StartActivity(SupervisorSyncedOrders)
 	Activity.Finish
 End Sub
 
