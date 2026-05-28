@@ -66,6 +66,10 @@ Sub Globals
 	Private bttnConfirmPurchaseStatus As Button
 	Private bttnCancelPurchaseStatus As Button
 	
+	' Fulfillment state
+	Private SelectedFulfillmentMode As String = "PAID_RECEIVED"
+	Private IgnoreRadioChanges As Boolean = False
+	
 	' Delete selection buttons / popup
 	Private btnDeleteSelected As Button
 	Private btnNoDelete As Button
@@ -75,6 +79,10 @@ End Sub
 
 Sub Activity_Create(FirstTime As Boolean)
 	Activity.LoadLayout("addOrderActivity")
+	If Main.LoggedInUserID <= 0 Then
+		Activity.Finish
+		Return
+	End If
 
 	If Main.VENDOR_ID <= 0 Or Main.LoggedInUserID <= 0 Then
 		ToastMessageShow("Session is invalid. Please login again.", True)
@@ -89,9 +97,7 @@ Sub Activity_Create(FirstTime As Boolean)
 	ApplyPendingCopyOrder
 
 	pnlPurchaseStatus.Visible = False
-	rbPaidReceived.Checked = True
-	rbPaidBooked.Checked = False
-	rbNotPaidBooked.Checked = False
+	InitFulfillmentToggles
 	btnDeleteSelected.Enabled = True
 	btnDeleteSelected.Color = Colors.ARGB(80, 200, 200, 200)
 	PnlConfirmDelete.Visible = False
@@ -100,6 +106,10 @@ Sub Activity_Create(FirstTime As Boolean)
 End Sub
 
 Sub Activity_Resume
+	If Main.LoggedInUserID <= 0 Then
+		Activity.Finish
+		Return
+	End If
 	ApplyPendingCopyOrder
 End Sub
 
@@ -130,6 +140,19 @@ End Sub
 
 Private Sub LoadCopiedOrderIntoCart(sourceOrderID As Int)
 	Try
+		Dim rsOrder As ResultSet = Main.SQLProducts.ExecQuery2( _
+			"SELECT customer_id, customer_code, customer_name, customer_owner, customer_address FROM orders WHERE order_id = ?", _
+			Array As String(sourceOrderID))
+
+		If rsOrder.NextRow Then
+			Main.SELECTED_CUSTOMER_ID = rsOrder.GetInt("customer_id")
+			Main.SELECTED_CUSTOMER_CODE = rsOrder.GetString("customer_code")
+			Main.SELECTED_CUSTOMER_NAME = rsOrder.GetString("customer_name")
+			Main.SELECTED_CUSTOMER_OWNER = rsOrder.GetString("customer_owner")
+			Main.SELECTED_CUSTOMER_ADDRESS = rsOrder.GetString("customer_address")
+		End If
+		rsOrder.Close
+
 		Dim rsItems As ResultSet = Main.SQLProducts.ExecQuery2( _
 			"SELECT oi.product_id, oi.quantity, oi.price, i.item_name, i.item_code " & _
 			"FROM order_items oi " & _
@@ -233,10 +256,9 @@ Private Sub bttnPurchaseNow_Click
 	pnlPurchaseStatus.Visible = True
 	pnlPurchaseStatus.BringToFront
 
-	' Reset radio buttons
-	rbPaidReceived.Checked = True
-	rbPaidBooked.Checked = False
-	rbNotPaidBooked.Checked = False
+	' Reset toggle states to default (Paid + Received)
+	SetSelectedFulfillmentMode("PAID_RECEIVED")
+	LayoutPurchaseStatusOptions
 End Sub
 
 Private Sub HidePurchaseStatusPopup
@@ -244,26 +266,52 @@ Private Sub HidePurchaseStatusPopup
 	pnlDim.Visible = False
 End Sub
 
-Private Sub GetSelectedFulfillmentStatus As String
-	If rbPaidReceived.Checked Then
-		Return "Paid-Received"
-	Else If rbPaidBooked.Checked Then
-		Return "Paid-Booked"
-	Else If rbNotPaidBooked.Checked Then
-		Return "NotPaid-Booked"
-	Else
-		Return ""
+' Tighten spacing of the status options inside the popup.
+Private Sub LayoutPurchaseStatusOptions
+	If rbPaidReceived.IsInitialized = False Or rbPaidBooked.IsInitialized = False Or rbNotPaidBooked.IsInitialized = False Then Return
+	If lblPurchaseStatusMessage.IsInitialized = False Or bttnConfirmPurchaseStatus.IsInitialized = False Then Return
+	
+	Dim startY As Int = lblPurchaseStatusMessage.Top + lblPurchaseStatusMessage.Height + 12dip
+	Dim maxBottom As Int = bttnConfirmPurchaseStatus.Top - 10dip
+	Dim available As Int = maxBottom - startY
+	If available <= 0 Then Return
+	
+	Dim optionH As Int = 38dip
+	Dim gap As Int = 8dip
+	Dim needed As Int = (3 * optionH) + (2 * gap)
+	If needed > available Then
+		gap = 4dip
+		optionH = Max(30dip, (available - 2 * gap) / 3)
 	End If
+	
+	rbPaidReceived.Height = optionH
+	rbPaidBooked.Height = optionH
+	rbNotPaidBooked.Height = optionH
+	
+	rbPaidReceived.Top = startY
+	rbPaidBooked.Top = rbPaidReceived.Top + optionH + gap
+	rbNotPaidBooked.Top = rbPaidBooked.Top + optionH + gap
+End Sub
+
+Private Sub GetSelectedFulfillmentStatus As String
+	Select Case SelectedFulfillmentMode
+		Case "PAID_RECEIVED"
+			Return "Paid-Received"
+		Case "PAID_BOOKED"
+			Return "Paid-Booked"
+		Case "NOTPAID_BOOKED"
+			Return "NotPaid-Booked"
+		Case Else
+			Return ""
+	End Select
 End Sub
 
 Private Sub bttnConfirmPurchaseStatus_Click
 	Dim fulfillmentStatus As String = GetSelectedFulfillmentStatus
-
 	If fulfillmentStatus = "" Then
-		ToastMessageShow("Please select a fulfillment status", True)
+		ToastMessageShow("Please choose a fulfillment status.", True)
 		Return
 	End If
-
 	SaveOrderToLocalDatabase(fulfillmentStatus)
 	HidePurchaseStatusPopup
 	ClearCartAndResetUI
@@ -275,22 +323,64 @@ Private Sub bttnCancelPurchaseStatus_Click
 	HidePurchaseStatusPopup
 End Sub
 
+Private Sub InitFulfillmentToggles
+	SelectedFulfillmentMode = "PAID_RECEIVED"
+	UpdateToggleVisuals
+End Sub
+
 Private Sub rbPaidReceived_CheckedChange(Checked As Boolean)
-	If Checked = False Then Return
-	rbPaidBooked.Checked = False
-	rbNotPaidBooked.Checked = False
+	If IgnoreRadioChanges Then Return
+	If Not(Checked) Then Return
+	SetSelectedFulfillmentMode("PAID_RECEIVED")
 End Sub
 
 Private Sub rbPaidBooked_CheckedChange(Checked As Boolean)
-	If Checked = False Then Return
-	rbPaidReceived.Checked = False
-	rbNotPaidBooked.Checked = False
+	If IgnoreRadioChanges Then Return
+	If Not(Checked) Then Return
+	SetSelectedFulfillmentMode("PAID_BOOKED")
 End Sub
 
 Private Sub rbNotPaidBooked_CheckedChange(Checked As Boolean)
-	If Checked = False Then Return
-	rbPaidReceived.Checked = False
-	rbPaidBooked.Checked = False
+	If IgnoreRadioChanges Then Return
+	If Not(Checked) Then Return
+	SetSelectedFulfillmentMode("NOTPAID_BOOKED")
+End Sub
+
+Private Sub SetSelectedFulfillmentMode(ModeName As String)
+	SelectedFulfillmentMode = ModeName
+	UpdateToggleVisuals
+End Sub
+
+Private Sub UpdateToggleVisuals
+	IgnoreRadioChanges = True
+	
+	rbPaidReceived.Checked = SelectedFulfillmentMode = "PAID_RECEIVED"
+	rbPaidBooked.Checked = SelectedFulfillmentMode = "PAID_BOOKED"
+	rbNotPaidBooked.Checked = SelectedFulfillmentMode = "NOTPAID_BOOKED"
+
+	rbPaidReceived.Text = "Paid + Received"
+	rbPaidBooked.Text = "Paid + Booked"
+	rbNotPaidBooked.Text = "Not Paid + Booked"
+
+	If rbPaidReceived.Checked Then
+		rbPaidReceived.TextColor = Colors.RGB(0, 128, 0)
+	Else
+		rbPaidReceived.TextColor = Colors.DarkGray
+	End If
+
+	If rbPaidBooked.Checked Then
+		rbPaidBooked.TextColor = Colors.RGB(0, 128, 0)
+	Else
+		rbPaidBooked.TextColor = Colors.DarkGray
+	End If
+
+	If rbNotPaidBooked.Checked Then
+		rbNotPaidBooked.TextColor = Colors.RGB(0, 128, 0)
+	Else
+		rbNotPaidBooked.TextColor = Colors.DarkGray
+	End If
+	
+	IgnoreRadioChanges = False
 End Sub
 
 Private Sub ClearCartAndResetUI
@@ -300,9 +390,7 @@ Private Sub ClearCartAndResetUI
 	bttnPurchaseNow.Color = Colors.ARGB(80, 200, 200, 200)
 	bttnPurchaseNow.Enabled = False
 
-	rbPaidReceived.Checked = True
-	rbPaidBooked.Checked = False
-	rbNotPaidBooked.Checked = False
+	SetSelectedFulfillmentMode("PAID_RECEIVED")
 	ExitSelectionMode
 End Sub
 
@@ -585,6 +673,14 @@ Private Sub SaveOrderToLocalDatabase(FulfillmentStatus As String)
 			Return
 		End If
 
+		If FulfillmentStatus.Contains("Received") Then
+			Dim stockCheckMessage As String = ValidateCartForReceivedFulfillment
+			If stockCheckMessage <> "" Then
+				ToastMessageShow(stockCheckMessage, True)
+				Return
+			End If
+		End If
+
 		Dim transactionNumber As String = GenerateTransactionNumber
 		Dim total As Double = 0
 		Dim totalQuantity As Int = 0
@@ -620,6 +716,10 @@ Private Sub SaveOrderToLocalDatabase(FulfillmentStatus As String)
                 Array As Object(newOrderID, productID, quantity, unitPrice, FulfillmentStatus, paymentStatus, deliveryStatus))
 		Next
 
+		If bookingValue = 0 Then
+			ApplyStockDeductionFromCart
+		End If
+
 		Log("Order saved with transaction: " & transactionNumber)
 
 	Catch
@@ -628,22 +728,105 @@ Private Sub SaveOrderToLocalDatabase(FulfillmentStatus As String)
 	End Try
 End Sub
 
+Private Sub ValidateCartForReceivedFulfillment As String
+	For Each cartItem As Map In CartItems
+		Dim productID As Int = cartItem.Get("product_id")
+		Dim itemName As String = cartItem.Get("item_name")
+		Dim requestedQty As Int = GetCartQuantityForProduct(productID)
+		Dim availableStock As Int = GetRemainingStockForProduct(productID)
+
+		If availableStock < 0 Then
+			Return "No stock data available for " & itemName & ". Sync inventory first."
+		End If
+
+		If requestedQty > availableStock Then
+			Return "Not enough stock for " & itemName & ". Available: " & availableStock & ", requested: " & requestedQty
+		End If
+	Next
+
+	Return ""
+End Sub
+
+Private Sub ApplyStockDeductionFromCart
+	Try
+		Main.SQLProducts.ExecNonQuery("BEGIN TRANSACTION")
+
+		For Each cartItem As Map In CartItems
+			Dim productID As Int = cartItem.Get("product_id")
+			Dim quantity As Int = cartItem.Get("quantity")
+			Dim remainingStock As Int = GetRemainingStockForProduct(productID)
+			If remainingStock < 0 Then Continue
+
+			Main.SQLProducts.ExecNonQuery2( _
+				"UPDATE items SET used_stock = IFNULL(used_stock, 0) + ?, remaining_stock = CASE WHEN IFNULL(remaining_stock, 0) - ? < 0 THEN 0 ELSE IFNULL(remaining_stock, 0) - ? END WHERE item_id = ? AND (IFNULL(assigned_stock, 0) > 0 OR IFNULL(used_stock, 0) > 0 OR IFNULL(remaining_stock, 0) > 0)", _
+				Array As Object(quantity, quantity, quantity, productID))
+		Next
+
+		Main.SQLProducts.ExecNonQuery("COMMIT")
+	Catch
+		Try
+			Main.SQLProducts.ExecNonQuery("ROLLBACK")
+		Catch
+			Log(LastException.Message)
+		End Try
+		Log("ApplyStockDeductionFromCart error: " & LastException.Message)
+	End Try
+End Sub
+
+Private Sub GetCartQuantityForProduct(ProductID As Int) As Int
+	Dim totalQuantity As Int = 0
+	For Each cartItem As Map In CartItems
+		Dim existingProductID As Int = cartItem.Get("product_id")
+		If existingProductID = ProductID Then
+			totalQuantity = totalQuantity + cartItem.Get("quantity")
+		End If
+	Next
+	Return totalQuantity
+End Sub
+
+Private Sub GetRemainingStockForProduct(ProductID As Int) As Int
+	If Main.SQLProducts.IsInitialized = False Then Return -1
+
+	Dim rs As ResultSet
+	Try
+		rs = Main.SQLProducts.ExecQuery2( _
+			"SELECT IFNULL(assigned_stock, 0) AS assigned_stock, IFNULL(used_stock, 0) AS used_stock, IFNULL(remaining_stock, 0) AS remaining_stock FROM items WHERE item_id = ?", _
+			Array As String(ProductID))
+
+		If rs.NextRow Then
+			Dim assignedStock As Int = rs.GetInt("assigned_stock")
+			Dim usedStock As Int = rs.GetInt("used_stock")
+			Dim remainingStock As Int = rs.GetInt("remaining_stock")
+			rs.Close
+			If assignedStock <= 0 And usedStock <= 0 And remainingStock <= 0 Then Return -1
+			If remainingStock < 0 Then remainingStock = 0
+			Return remainingStock
+		End If
+		rs.Close
+	Catch
+		If rs.IsInitialized Then rs.Close
+		Log("GetRemainingStockForProduct error: " & LastException.Message)
+	End Try
+
+	Return -1
+End Sub
+
 Private Sub GetBookingFromFulfillmentStatus(FulfillmentStatus As String) As Int
-	If FulfillmentStatus = "Paid-Received" Then
+	If FulfillmentStatus.Contains("Booked") Then
 		Return 1
 	End If
 	Return 0
 End Sub
 
 Private Sub GetPrepaidFromFulfillmentStatus(FulfillmentStatus As String) As Int
-	If FulfillmentStatus = "Paid-Received" Or FulfillmentStatus = "Paid-Booked" Then
+	If FulfillmentStatus.Contains("Paid") And Not(FulfillmentStatus.Contains("NotPaid")) Then
 		Return 1
 	End If
 	Return 0
 End Sub
 
 Private Sub GetPaymentStatusFromFulfillmentStatus(FulfillmentStatus As String) As String
-	If FulfillmentStatus = "Paid-Received" Or FulfillmentStatus = "Paid-Booked" Then
+	If FulfillmentStatus.Contains("Paid") And Not(FulfillmentStatus.Contains("NotPaid")) Then
 		Return "Paid"
 	Else
 		Return "NotPaid"
@@ -651,7 +834,7 @@ Private Sub GetPaymentStatusFromFulfillmentStatus(FulfillmentStatus As String) A
 End Sub
 
 Private Sub GetDeliveryStatusFromFulfillmentStatus(FulfillmentStatus As String) As String
-	If FulfillmentStatus = "Paid-Received" Then
+	If FulfillmentStatus.Contains("Received") Then
 		Return "Received"
 	Else
 		Return "NotReceived"
@@ -798,5 +981,7 @@ Private Sub btnNoDelete_Click
 	PnlConfirmDelete.Visible = False
 
 End Sub
+
+
 
 

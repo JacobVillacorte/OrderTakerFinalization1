@@ -16,9 +16,10 @@ Sub Globals
 	Private pnlWholeSupervisor As Panel
 	Private pnlDim As Panel
 	Private pnlTop As Panel
+	Private lblBack As Label
 	Private lblTitle As Label
 	Private lblSubTitle As Label
-	Private bttnRefresh As Button
+	Private lblRefresh As Label
 	Private pnlBody As Panel
 	Private etSearch As EditText
 	Private lblStatus As Label
@@ -30,13 +31,21 @@ Sub Globals
 	Private lblConfirmVendor As Label
 	Private bttnCancel As Button
 	Private bttnProceed As Button
+	Private btnGoToQueue As Button
 	Private orderTakerRows As List
+	Private currentLoadJob As HttpJob
+	Private isActivityActive As Boolean
 	Private selectedUserId As Int = 0
 	Private selectedRowData As Map
 End Sub
 
 Sub Activity_Create(FirstTime As Boolean)
 	Activity.LoadLayout("SupervisorOrderTakerSelection")
+	If Main.LoggedInUserID <= 0 Then
+		Activity.Finish
+		Return
+	End If
+	isActivityActive = True
 	If pnlConfirm.IsInitialized Then
 		If pnlConfirm.NumberOfViews >= 6 Then
 			bttnCancel = pnlConfirm.GetView(4)
@@ -57,9 +66,6 @@ Sub Activity_Create(FirstTime As Boolean)
 	If lblSubTitle.IsInitialized Then
 		lblSubTitle.Text = "Select the order taker you want to view"
 	End If
-	If bttnRefresh.IsInitialized Then
-		bttnRefresh.Text = "Reload"
-	End If
 	If lblConfirmTitle.IsInitialized Then
 		lblConfirmTitle.Text = "View this order taker?"
 	End If
@@ -67,6 +73,11 @@ Sub Activity_Create(FirstTime As Boolean)
 End Sub
 
 Sub Activity_Resume
+	isActivityActive = True
+	If Main.LoggedInUserID <= 0 Then
+		Activity.Finish
+		Return
+	End If
 	If orderTakerRows.IsInitialized = False Or orderTakerRows.Size = 0 Then
 		LoadOrderTakers
 	Else
@@ -75,6 +86,15 @@ Sub Activity_Resume
 End Sub
 
 Sub Activity_Pause(UserClosed As Boolean)
+	isActivityActive = False
+	If currentLoadJob <> Null Then
+		Try
+			If currentLoadJob.IsInitialized Then currentLoadJob.Release
+		Catch
+			Log(LastException.Message)
+		End Try
+		currentLoadJob = Null
+	End If
 End Sub
 
 Private Sub LoadOrderTakers
@@ -83,13 +103,20 @@ Private Sub LoadOrderTakers
 
 	Dim job As HttpJob
 	job.Initialize("load_order_takers", Me)
+	currentLoadJob = job
 	job.Download(Main.API_URL & "API/get_order_takers.php?convention_id=" & Main.LoggedInConventionID & "&limit=200")
 
 	Wait For (job) JobDone(job As HttpJob)
+	If isActivityActive = False Then
+		job.Release
+		currentLoadJob = Null
+		Return
+	End If
 	If job.Success = False Then
 		lblStatus.Text = "Unable to load order takers."
 		ToastMessageShow("Unable to load order takers.", True)
 		job.Release
+		currentLoadJob = Null
 		Return
 	End If
 
@@ -105,6 +132,7 @@ Private Sub LoadOrderTakers
 			lblStatus.Text = message
 			ToastMessageShow(message, True)
 			job.Release
+			currentLoadJob = Null
 			Return
 		End If
 
@@ -122,6 +150,7 @@ Private Sub LoadOrderTakers
 	End Try
 
 	job.Release
+	currentLoadJob = Null
 End Sub
 
 Private Sub ApplySearchFilter
@@ -253,8 +282,19 @@ Private Sub etSearch_TextChanged (Old As String, New As String)
 	ApplySearchFilter
 End Sub
 
-Private Sub bttnRefresh_Click
+Private Sub lblRefresh_Click
 	LoadOrderTakers
+End Sub
+
+Private Sub btnGoToQueue_Click
+	StartActivity(SupervisorStockRequestQueue)
+	Activity.Finish
+End Sub
+
+Private Sub lblBack_Click
+	CallSub(Main, "ResetSessionForLogout")
+	StartActivity(Main)
+	Activity.Finish
 End Sub
 
 Private Sub pnlDim_Click
@@ -302,16 +342,11 @@ Private Sub bttnProceed_Click
 		Main.SelectedOrderTakerRequiresVendorSelection = (Main.SelectedOrderTakerAssignedVendors.Size > 1)
 	End If
 
-	Main.LoggedInUser = Main.SelectedOrderTakerLoginName
-	Main.LoggedInUserID = Main.SelectedOrderTakerUserID
-	Main.LoggedInUserFullName = Main.SelectedOrderTakerFullName
-	Main.LoggedInGroupID = Main.SelectedOrderTakerGroupID
-	Main.VENDOR_ID = Main.SelectedOrderTakerVendorID
-	Main.LoggedInRequiresVendorSelection = Main.SelectedOrderTakerRequiresVendorSelection
-	Main.IsSupervisorMode = True
+	Main.LoggedInRequiresVendorSelection = False
+	Main.COPY_ORDER_SOURCE_ID = 0
 
 	ToastMessageShow("Viewing " & Main.SelectedOrderTakerFullName, False)
-	StartActivity(OrderTakerDashboard)
+	StartActivity(SupervisorSyncedOrders)
 	Activity.Finish
 End Sub
 
@@ -325,7 +360,7 @@ Private Sub clvOrderTakers_ItemClick (Index As Int, Value As Object)
 
 	ShowConfirmPanel(selectedRowData)
 End Sub
-
+	
 Private Sub ShowConfirmPanel(row As Map)
 	If pnlDim.IsInitialized Then pnlDim.Visible = True
 	If pnlConfirm.IsInitialized Then pnlConfirm.Visible = True
