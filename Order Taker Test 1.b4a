@@ -96,7 +96,7 @@ Sub Process_Globals
 	Public COPY_ORDER_SOURCE_ID As Int = 0
 
 	' API base URL (important: base path only, not specific endpoint)
-	Public API_URL As String = "http://192.168.8.224/ordertaker_api/"
+	Public API_URL As String = "http://192.168.8.225/ordertaker_api/"
 	Public ITEMS_LAST_SYNC As Long = 0
 
 	Private xui As XUI

@@ -156,7 +156,7 @@ Private Sub CreateRequestRow(row As Map) As Panel
 	Dim pnl As Panel
 	pnl.Initialize("")
 	pnl.Color = Colors.White
-	pnl.SetLayout(0, 0, clvRequests.AsView.Width, 124dip)
+	pnl.SetLayout(0, 0, clvRequests.AsView.Width, 136dip)
 
 	Dim lblTitleRow As Label
 	lblTitleRow.Initialize("")
@@ -164,49 +164,53 @@ Private Sub CreateRequestRow(row As Map) As Panel
 	lblTitleRow.TextSize = 16
 	lblTitleRow.Typeface = Typeface.DEFAULT_BOLD
 	lblTitleRow.TextColor = Colors.Black
-	pnl.AddView(lblTitleRow, 12dip, 8dip, clvRequests.AsView.Width - 120dip, 22dip)
+	pnl.AddView(lblTitleRow, 12dip, 8dip, clvRequests.AsView.Width - 152dip, 22dip)
 
 	Dim lblRequester As Label
 	lblRequester.Initialize("")
 	lblRequester.Text = "Requested by: " & requesterName
 	lblRequester.TextSize = 12
 	lblRequester.TextColor = Colors.Gray
-	pnl.AddView(lblRequester, 12dip, 32dip, clvRequests.AsView.Width - 120dip, 18dip)
+	pnl.AddView(lblRequester, 12dip, 32dip, clvRequests.AsView.Width - 152dip, 18dip)
 
 	Dim lblMeta As Label
 	lblMeta.Initialize("")
 	lblMeta.Text = "Qty: " & requestedQty & "  |  Device: " & deviceId
 	lblMeta.TextSize = 12
 	lblMeta.TextColor = Colors.RGB(75, 95, 125)
-	pnl.AddView(lblMeta, 12dip, 52dip, clvRequests.AsView.Width - 120dip, 18dip)
+	pnl.AddView(lblMeta, 12dip, 52dip, clvRequests.AsView.Width - 152dip, 18dip)
 
 	Dim lblCreated As Label
 	lblCreated.Initialize("")
 	lblCreated.Text = createdAt
 	lblCreated.TextSize = 11
 	lblCreated.TextColor = Colors.RGB(120, 120, 120)
-	pnl.AddView(lblCreated, 12dip, 72dip, clvRequests.AsView.Width - 120dip, 16dip)
+	pnl.AddView(lblCreated, 12dip, 72dip, clvRequests.AsView.Width - 152dip, 16dip)
 
 	Dim btnApprove As Button
 	btnApprove.Initialize("btnApprove")
 	btnApprove.Text = "Approve"
 	btnApprove.Tag = requestId
 	btnApprove.TextColor = Colors.White
+	btnApprove.TextSize = 11
+	btnApprove.Gravity = Gravity.CENTER
 	btnApprove.Color = Colors.RGB(46, 125, 50)
-	pnl.AddView(btnApprove, clvRequests.AsView.Width - 100dip, 18dip, 86dip, 30dip)
+	pnl.AddView(btnApprove, clvRequests.AsView.Width - 116dip, 14dip, 104dip, 34dip)
 
 	Dim btnReject As Button
 	btnReject.Initialize("btnReject")
 	btnReject.Text = "Reject"
 	btnReject.Tag = requestId
 	btnReject.TextColor = Colors.White
+	btnReject.TextSize = 11
+	btnReject.Gravity = Gravity.CENTER
 	btnReject.Color = Colors.RGB(198, 40, 40)
-	pnl.AddView(btnReject, clvRequests.AsView.Width - 100dip, 54dip, 86dip, 30dip)
+	pnl.AddView(btnReject, clvRequests.AsView.Width - 116dip, 58dip, 104dip, 34dip)
 
 	Dim pnlSep As Panel
 	pnlSep.Initialize("")
 	pnlSep.Color = Colors.RGB(235, 235, 235)
-	pnl.AddView(pnlSep, 12dip, 120dip, clvRequests.AsView.Width - 24dip, 1dip)
+	pnl.AddView(pnlSep, 12dip, 132dip, clvRequests.AsView.Width - 24dip, 1dip)
 
 	Return pnl
 End Sub

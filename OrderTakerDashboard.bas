@@ -200,6 +200,7 @@ Sub EnsureLocalSchema
 	AddColumnIfMissing("orders", "is_paid", "INTEGER DEFAULT 0")
 	AddColumnIfMissing("orders", "is_received", "INTEGER DEFAULT 0")
 	AddColumnIfMissing("orders", "is_booked", "INTEGER DEFAULT 0")
+	BackfillOrderFulfillmentFlags
 
 	' order_items table
 	AddColumnIfMissing("order_items", "fulfillment_status", "TEXT DEFAULT ''")
@@ -482,9 +483,10 @@ Private Sub LoadOrdersIntoList
 		lblSync.Color = Colors.Transparent
 		lblSync.SetLayout(10dip, 58dip, 120dip, 16dip)
 
-		Dim orderIsPaid As Boolean = rs.GetInt("is_paid") = 1
-		Dim orderIsReceived As Boolean = rs.GetInt("is_received") = 1
-		Dim orderIsBooked As Boolean = rs.GetInt("is_booked") = 1
+		Dim fulfillmentFlags As Map = ResolveOrderFulfillmentFlags(rs)
+		Dim orderIsPaid As Boolean = fulfillmentFlags.Get("is_paid")
+		Dim orderIsReceived As Boolean = fulfillmentFlags.Get("is_received")
+		Dim orderIsBooked As Boolean = fulfillmentFlags.Get("is_booked")
 
 		Dim lblOrderStatus As Label
 		lblOrderStatus.Initialize("")
@@ -789,17 +791,11 @@ Private Sub ShowOrderDetails(orderID As Int)
 			If orderStatus = Null Then orderStatus = ""
 		End If
 
-		Dim isPaid As Boolean = False
-		Dim isReceived As Boolean = False
-		Dim isBooked As Boolean = False
-		If HasColumn("orders", "is_paid") Then
-			isPaid = cursorOrder.GetInt("is_paid") = 1
-			isReceived = cursorOrder.GetInt("is_received") = 1
-			isBooked = cursorOrder.GetInt("is_booked") = 1
-			orderStatus = BuildOrderStatusDisplay(isPaid, isReceived, isBooked)
-		Else
-			orderStatus = GetOrderDisplayStatus(orderID, orderStatus)
-		End If
+		Dim fulfillmentFlags As Map = ResolveOrderFulfillmentFlags(cursorOrder)
+		Dim isPaid As Boolean = fulfillmentFlags.Get("is_paid")
+		Dim isReceived As Boolean = fulfillmentFlags.Get("is_received")
+		Dim isBooked As Boolean = fulfillmentFlags.Get("is_booked")
+		orderStatus = BuildOrderStatusDisplay(isPaid, isReceived, isBooked)
 
 		Dim customerName As String = ""
 		Dim customerOwner As String = ""
@@ -1076,7 +1072,7 @@ Private Sub GetPendingLocalStockUsageMap As Map
 			"SELECT oi.product_id, IFNULL(SUM(oi.quantity), 0) AS pending_qty " & _
 			"FROM orders o " & _
 			"INNER JOIN order_items oi ON oi.order_id = o.order_id " & _
-			"WHERE o.vendor_id = ? AND o.user_id = ? AND IFNULL(o.sync_status, '') NOT IN ('Synced', 'Cancelled') " & _
+				"WHERE o.vendor_id = ? AND o.user_id = ? AND IFNULL(o.sync_status, '') NOT IN ('Synced', 'Cancelled') AND IFNULL(o.booking, 0) = 0 " & _
 			"GROUP BY oi.product_id", _
 			Array As String(Main.VENDOR_ID, Main.LoggedInUserID))
 
@@ -1702,6 +1698,69 @@ Private Sub ShowFetchErrorMessage(errorMessage As String)
 	lblFetchStatus.TextColor = Colors.Red
 End Sub
 
+Private Sub BackfillOrderFulfillmentFlags
+	Try
+		If HasColumn("orders", "booking") And HasColumn("orders", "is_booked") Then
+			Main.SQLProducts.ExecNonQuery( _
+				"UPDATE orders SET is_booked = 1 WHERE IFNULL(is_booked, 0) = 0 AND IFNULL(booking, 0) = 1")
+		End If
+		If HasColumn("orders", "prepaid") And HasColumn("orders", "is_paid") Then
+			Main.SQLProducts.ExecNonQuery( _
+				"UPDATE orders SET is_paid = 1 WHERE IFNULL(is_paid, 0) = 0 AND IFNULL(prepaid, 0) = 1")
+		End If
+		If HasColumn("orders", "status") And HasColumn("orders", "is_booked") Then
+			Main.SQLProducts.ExecNonQuery( _
+				"UPDATE orders SET is_booked = 1 WHERE IFNULL(is_booked, 0) = 0 AND status LIKE '%Booked%'")
+			Main.SQLProducts.ExecNonQuery( _
+				"UPDATE orders SET is_received = 1 WHERE IFNULL(is_received, 0) = 0 AND status LIKE '%Received%'")
+			Main.SQLProducts.ExecNonQuery( _
+				"UPDATE orders SET is_paid = 1 WHERE IFNULL(is_paid, 0) = 0 AND status LIKE '%Paid%' AND status NOT LIKE '%NotPaid%'")
+		End If
+	Catch
+		Log("BackfillOrderFulfillmentFlags: " & LastException.Message)
+	End Try
+End Sub
+
+Private Sub ResolveOrderFulfillmentFlags(rs As ResultSet) As Map
+	Dim flags As Map
+	flags.Initialize
+	Dim isPaid As Boolean = False
+	Dim isReceived As Boolean = False
+	Dim isBooked As Boolean = False
+
+	Try
+		If HasColumnValue(rs, "is_paid") Then
+			isPaid = rs.GetInt("is_paid") = 1
+			isReceived = rs.GetInt("is_received") = 1
+			isBooked = rs.GetInt("is_booked") = 1
+		End If
+		If HasColumnValue(rs, "booking") And rs.GetInt("booking") = 1 Then
+			isBooked = True
+		End If
+		If HasColumnValue(rs, "prepaid") And rs.GetInt("prepaid") = 1 Then
+			isPaid = True
+		End If
+		If HasColumnValue(rs, "status") Then
+			Dim statusText As String = rs.GetString("status")
+			If statusText <> Null And statusText <> "" Then
+				Dim isSyncLabel As Boolean = statusText = "Holding" Or statusText = "Pending" Or statusText = "Synced"
+				If isSyncLabel = False Then
+					If statusText.Contains("Booked") Then isBooked = True
+					If statusText.Contains("Received") Then isReceived = True
+					If statusText.Contains("Paid") And statusText.Contains("NotPaid") = False Then isPaid = True
+				End If
+			End If
+		End If
+	Catch
+		Log("ResolveOrderFulfillmentFlags: " & LastException.Message)
+	End Try
+
+	flags.Put("is_paid", isPaid)
+	flags.Put("is_received", isReceived)
+	flags.Put("is_booked", isBooked)
+	Return flags
+End Sub
+
 Private Sub BuildOrderStatusDisplay(isPaid As Boolean, isReceived As Boolean, isBooked As Boolean) As String
 	Dim parts As List
 	parts.Initialize
@@ -1714,50 +1773,6 @@ Private Sub BuildOrderStatusDisplay(isPaid As Boolean, isReceived As Boolean, is
 		result = result & parts.Get(i)
 	Next
 	Return result
-End Sub
-
-Private Sub GetOrderDisplayStatus(orderID As Int, fallbackStatus As String) As String
-	' Try reading boolean columns first
-	Try
-		If HasColumn("orders", "is_paid") Then
-			Dim rsStatus As ResultSet = Main.SQLProducts.ExecQuery2( _
-				"SELECT is_paid, is_received, is_booked FROM orders WHERE order_id = ?", _
-				Array As String(orderID))
-			If rsStatus.NextRow Then
-				Dim result As String = BuildOrderStatusDisplay( _
-					rsStatus.GetInt("is_paid") = 1, _
-					rsStatus.GetInt("is_received") = 1, _
-					rsStatus.GetInt("is_booked") = 1)
-				rsStatus.Close
-				If result <> "" Then Return result
-			End If
-			rsStatus.Close
-		End If
-	Catch
-		Log("GetOrderDisplayStatus boolean path error: " & LastException.Message)
-	End Try
-
-	If fallbackStatus <> "" And fallbackStatus <> "Pending" Then
-		Return fallbackStatus
-	End If
-
-	Try
-		Dim rs As ResultSet = Main.SQLProducts.ExecQuery2( _
-			"SELECT fulfillment_status FROM order_items WHERE order_id = ? LIMIT 1", _
-			Array As String(orderID))
-		If rs.NextRow Then
-			Dim fulfillmentStatus As String = rs.GetString("fulfillment_status")
-			If fulfillmentStatus <> Null And fulfillmentStatus <> "" Then
-				rs.Close
-				Return fulfillmentStatus
-			End If
-		End If
-		rs.Close
-	Catch
-		Log("GetOrderDisplayStatus error: " & LastException.Message)
-	End Try
-
-	Return fallbackStatus
 End Sub
 
 ' ======================
@@ -2336,5 +2351,6 @@ Private Sub DrawPieChartLegend(cvs As Canvas, panel As Panel, completed As Int, 
 	cvs.DrawRect(rect, Colors.RGB(244, 67, 54), True, 0)
 	cvs.DrawText("Cancelled " & cancelled, legendStartX + boxSize + 8dip, legendStartY + spacing * 2 + 3dip, Typeface.DEFAULT, textSize, Colors.Black, "LEFT")
 End Sub
+
 
 

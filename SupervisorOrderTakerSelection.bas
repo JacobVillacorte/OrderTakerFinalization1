@@ -34,6 +34,7 @@ Sub Globals
 	Private btnGoToQueue As Button
 	Private orderTakerRows As List
 	Private currentLoadJob As HttpJob
+	Private isActivityActive As Boolean
 	Private selectedUserId As Int = 0
 	Private selectedRowData As Map
 End Sub
@@ -44,6 +45,7 @@ Sub Activity_Create(FirstTime As Boolean)
 		Activity.Finish
 		Return
 	End If
+	isActivityActive = True
 	If pnlConfirm.IsInitialized Then
 		If pnlConfirm.NumberOfViews >= 6 Then
 			bttnCancel = pnlConfirm.GetView(4)
@@ -71,6 +73,7 @@ Sub Activity_Create(FirstTime As Boolean)
 End Sub
 
 Sub Activity_Resume
+	isActivityActive = True
 	If Main.LoggedInUserID <= 0 Then
 		Activity.Finish
 		Return
@@ -83,6 +86,7 @@ Sub Activity_Resume
 End Sub
 
 Sub Activity_Pause(UserClosed As Boolean)
+	isActivityActive = False
 	If currentLoadJob <> Null Then
 		Try
 			If currentLoadJob.IsInitialized Then currentLoadJob.Release
@@ -103,6 +107,11 @@ Private Sub LoadOrderTakers
 	job.Download(Main.API_URL & "API/get_order_takers.php?convention_id=" & Main.LoggedInConventionID & "&limit=200")
 
 	Wait For (job) JobDone(job As HttpJob)
+	If isActivityActive = False Then
+		job.Release
+		currentLoadJob = Null
+		Return
+	End If
 	If job.Success = False Then
 		lblStatus.Text = "Unable to load order takers."
 		ToastMessageShow("Unable to load order takers.", True)
@@ -351,7 +360,7 @@ Private Sub clvOrderTakers_ItemClick (Index As Int, Value As Object)
 
 	ShowConfirmPanel(selectedRowData)
 End Sub
-
+	
 Private Sub ShowConfirmPanel(row As Map)
 	If pnlDim.IsInitialized Then pnlDim.Visible = True
 	If pnlConfirm.IsInitialized Then pnlConfirm.Visible = True
