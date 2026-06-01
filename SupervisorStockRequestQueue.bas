@@ -18,11 +18,22 @@ Sub Globals
 	Private lblTitle As Label
 	Private lblRefresh As Label
 	Private lblStatus As Label
+	Private pnlRequestFilters As Panel
+	Private etRequestSearch As EditText
+	Private btnAcceptAll As Button
+	Private btnRejectAll As Button
 	Private clvRequests As CustomListView
 	Private currentLoadJob As HttpJob
 	Private requestRows As List
+	Private filteredRequestRows As List
 	Private requestById As Map
 	Private isLoadingRequests As Boolean
+	Private bulkReviewRows As List
+	Private bulkReviewAction As String
+	Private bulkReviewIndex As Int
+	Private bulkReviewSuccessCount As Int
+	Private bulkReviewFailCount As Int
+	Private bulkReviewInProgress As Boolean
 End Sub
 
 Sub Activity_Create(FirstTime As Boolean)
@@ -34,10 +45,12 @@ Sub Activity_Create(FirstTime As Boolean)
 	currentLoadJob = Null
 	isLoadingRequests = False
 	requestRows.Initialize
+	filteredRequestRows.Initialize
 	requestById.Initialize
 	Activity.LoadLayout("SupervisorStockRequestQueue")
 	If lblTitle.IsInitialized Then lblTitle.Text = "Stock Requests"
 	If lblStatus.IsInitialized Then lblStatus.Text = "Loading pending requests..."
+	SetupRequestFilterBar
 	LoadPendingRequests
 End Sub
 
@@ -49,6 +62,8 @@ Sub Activity_Resume
 	If isLoadingRequests Then Return
 	If requestRows.IsInitialized = False Or requestRows.Size = 0 Then
 		LoadPendingRequests
+	Else
+		ApplyRequestFilters
 	End If
 End Sub
 
@@ -118,6 +133,7 @@ Private Sub LoadPendingRequests
 			requestRows.Add(row)
 			requestById.Put(GetIntValue(row, "request_id"), row)
 		Next
+		ApplyRequestFilters
 	Catch
 		lblStatus.Text = "Invalid requests response."
 		ToastMessageShow("Invalid requests response.", True)
@@ -127,21 +143,65 @@ Private Sub LoadPendingRequests
 	jobLoad.Release
 	currentLoadJob = Null
 	isLoadingRequests = False
+End Sub
+
+Private Sub SetupRequestFilterBar
+	If pnlRequestFilters.IsInitialized = False Then Return
+	If etRequestSearch.IsInitialized = False Then Return
+	If btnAcceptAll.IsInitialized = False Then Return
+	If btnRejectAll.IsInitialized = False Then Return
+End Sub
+
+Private Sub etRequestSearch_TextChanged (Old As String, New As String)
+	ApplyRequestFilters
+End Sub
+
+Private Sub btnAcceptAll_Click
+	StartBulkRequestReview("approved")
+End Sub
+
+Private Sub btnRejectAll_Click
+	StartBulkRequestReview("rejected")
+End Sub
+
+Private Sub ApplyRequestFilters
+	filteredRequestRows.Initialize
+
+	Dim searchText As String = ""
+	If etRequestSearch.IsInitialized Then searchText = etRequestSearch.Text.Trim.ToLowerCase
+
+	For Each row As Map In requestRows
+		If RequestMatchesFilter(row, searchText) Then
+			filteredRequestRows.Add(row)
+		End If
+	Next
+
 	RenderRequests
+End Sub
+
+Private Sub RequestMatchesFilter(row As Map, searchText As String) As Boolean
+	If searchText = "" Then Return True
+
+	Dim haystack As String = _
+		GetStringValue(row, "requester_name") & " " & _
+		GetStringValue(row, "item_name") & " " & _
+		GetStringValue(row, "device_id") & " " & _
+		GetIntValue(row, "request_id")
+	Return haystack.ToLowerCase.Contains(searchText)
 End Sub
 
 Private Sub RenderRequests
 	clvRequests.Clear
 
-	For Each row As Map In requestRows
+	For Each row As Map In filteredRequestRows
 		Dim requestId As Int = GetIntValue(row, "request_id")
 		clvRequests.Add(CreateRequestRow(row), requestId)
 	Next
 
-	If requestRows.Size = 0 Then
+	If filteredRequestRows.Size = 0 Then
 		ShowEmptyMessage("No pending requests found.")
 	Else
-		lblStatus.Text = requestRows.Size & " pending request(s) loaded"
+		lblStatus.Text = filteredRequestRows.Size & " pending request(s) loaded"
 	End If
 End Sub
 
@@ -238,10 +298,48 @@ Private Sub HandleReviewAction(senderObject As Object, actionStatus As String)
 	Wait For Msgbox_Result (Result As Int)
 	If Result <> DialogResponse.POSITIVE Then Return
 
-	RespondToRequest(requestId, actionStatus, GetIntValue(row, "requested_qty"))
+	RespondToRequest(requestId, actionStatus, GetIntValue(row, "requested_qty"), False)
 End Sub
 
-Private Sub RespondToRequest(requestId As Int, actionStatus As String, approvedQty As Int)
+Private Sub StartBulkRequestReview(actionStatus As String)
+	If filteredRequestRows.IsInitialized = False Or filteredRequestRows.Size = 0 Then
+		ToastMessageShow("No requests to process.", False)
+		Return
+	End If
+
+	Dim prompt As String = "Apply " & actionStatus & " to " & filteredRequestRows.Size & " request(s)?"
+	Msgbox2Async(prompt, "Confirm Bulk Review", "Yes", "", "No", Null, False)
+	Wait For Msgbox_Result (Result As Int)
+	If Result <> DialogResponse.POSITIVE Then Return
+
+	bulkReviewRows.Initialize
+	For Each row As Map In filteredRequestRows
+		bulkReviewRows.Add(row)
+	Next
+	bulkReviewAction = actionStatus
+	bulkReviewIndex = 0
+	bulkReviewSuccessCount = 0
+	bulkReviewFailCount = 0
+	bulkReviewInProgress = True
+	ProcessNextBulkRequestReview
+End Sub
+
+Private Sub ProcessNextBulkRequestReview
+	If bulkReviewInProgress = False Then Return
+
+	If bulkReviewIndex >= bulkReviewRows.Size Then
+		bulkReviewInProgress = False
+		ToastMessageShow("Bulk review finished. Success: " & bulkReviewSuccessCount & ", Failed: " & bulkReviewFailCount, False)
+		LoadPendingRequests
+		Return
+	End If
+
+	Dim row As Map = bulkReviewRows.Get(bulkReviewIndex)
+	bulkReviewIndex = bulkReviewIndex + 1
+	RespondToRequest(GetIntValue(row, "request_id"), bulkReviewAction, GetIntValue(row, "requested_qty"), True)
+End Sub
+
+Private Sub RespondToRequest(requestId As Int, actionStatus As String, approvedQty As Int, isBulk As Boolean)
 	Dim payload As Map
 	payload.Initialize
 	payload.Put("request_id", requestId)
@@ -261,9 +359,14 @@ Private Sub RespondToRequest(requestId As Int, actionStatus As String, approvedQ
 
 	Wait For (job) JobDone(jobResp As HttpJob)
 	If jobResp.Success = False Then
-		ToastMessageShow("Unable to update request.", True)
 		jobResp.Release
 		currentLoadJob = Null
+		If isBulk Then
+			bulkReviewFailCount = bulkReviewFailCount + 1
+			ProcessNextBulkRequestReview
+		Else
+			ToastMessageShow("Unable to update request.", True)
+		End If
 		Return
 	End If
 
@@ -272,18 +375,35 @@ Private Sub RespondToRequest(requestId As Int, actionStatus As String, approvedQ
 		parser.Initialize(jobResp.GetString)
 		Dim root As Map = parser.NextObject
 		If root.Get("status") <> "success" Then
-			ToastMessageShow(GetStringValue(root, "message"), True)
 			jobResp.Release
 			currentLoadJob = Null
+			If isBulk Then
+				bulkReviewFailCount = bulkReviewFailCount + 1
+				ProcessNextBulkRequestReview
+			Else
+				ToastMessageShow(GetStringValue(root, "message"), True)
+			End If
 			Return
 		End If
 
-		ToastMessageShow("Request updated.", False)
 		jobResp.Release
 		currentLoadJob = Null
-		LoadPendingRequests
+		If isBulk Then
+			bulkReviewSuccessCount = bulkReviewSuccessCount + 1
+			ProcessNextBulkRequestReview
+		Else
+			ToastMessageShow("Request updated.", False)
+			LoadPendingRequests
+		End If
 	Catch
-		ToastMessageShow("Invalid review response.", True)
+		jobResp.Release
+		currentLoadJob = Null
+		If isBulk Then
+			bulkReviewFailCount = bulkReviewFailCount + 1
+			ProcessNextBulkRequestReview
+		Else
+			ToastMessageShow("Invalid review response.", True)
+		End If
 	End Try
 End Sub
 
