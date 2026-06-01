@@ -19,9 +19,14 @@ Sub Globals
 	Private lblSubtitle As Label
 	Private lblRefresh As Label
 	Private lblStatus As Label
+	Private pnlSyncedFilters As Panel
+	Private etSyncedSearch As EditText
+	Private spnStatusFilter As Spinner
 	Private clvSyncedOrders As CustomListView
 	Private currentLoadJob As HttpJob
 	Private ordersRows As List
+	Private filteredOrdersRows As List
+	Private currentStatusFilter As String = "All"
 End Sub
 
 Sub Activity_Create(FirstTime As Boolean)
@@ -36,13 +41,12 @@ Sub Activity_Create(FirstTime As Boolean)
 	If lblTitle.IsInitialized Then
 		lblTitle.Text = "Supervisor View"
 	End If
-	If lblRefresh.IsInitialized Then
-		lblRefresh.Text = "Refresh"
-	End If
 	If lblStatus.IsInitialized Then
 		lblStatus.Text = "Loading synced orders..."
 	End If
 	ordersRows.Initialize
+	filteredOrdersRows.Initialize
+	SetupSyncedOrdersFilterBar
 	LoadSyncedOrders
 End Sub
 
@@ -53,6 +57,8 @@ Sub Activity_Resume
 	End If
 	If ordersRows.IsInitialized = False Or ordersRows.Size = 0 Then
 		LoadSyncedOrders
+	Else
+		ApplySyncedOrderFilters
 	End If
 End Sub
 
@@ -114,7 +120,7 @@ Private Sub LoadSyncedOrders
 			ordersRows.Add(row)
 		Next
 
-		BuildOrderList
+		ApplySyncedOrderFilters
 		If ordersRows.Size = 0 Then
 			lblStatus.Text = "No synced orders found."
 		Else
@@ -129,10 +135,72 @@ Private Sub LoadSyncedOrders
 	currentLoadJob = Null
 End Sub
 
+Private Sub SetupSyncedOrdersFilterBar
+	If pnlSyncedFilters.IsInitialized = False Then Return
+	If etSyncedSearch.IsInitialized = False Then Return
+	If spnStatusFilter.IsInitialized = False Then Return
+
+	If spnStatusFilter.Size = 0 Then
+		spnStatusFilter.Add("All")
+		spnStatusFilter.Add("Paid + Received")
+		spnStatusFilter.Add("Paid + Booked")
+		spnStatusFilter.Add("Booked")
+		spnStatusFilter.Add("Received")
+		spnStatusFilter.Add("Paid")
+		spnStatusFilter.Add("Unpaid")
+	End If
+
+	If spnStatusFilter.SelectedIndex < 0 Then spnStatusFilter.SelectedIndex = 0
+	currentStatusFilter = spnStatusFilter.SelectedItem
+End Sub
+
+Private Sub etSyncedSearch_TextChanged (Old As String, New As String)
+	ApplySyncedOrderFilters
+End Sub
+
+Private Sub spnStatusFilter_ItemClick (Position As Int, Value As Object)
+	currentStatusFilter = Value
+	ApplySyncedOrderFilters
+End Sub
+
+Private Sub ApplySyncedOrderFilters
+	filteredOrdersRows.Initialize
+
+	Dim searchText As String = ""
+	If etSyncedSearch.IsInitialized Then searchText = etSyncedSearch.Text.Trim.ToLowerCase
+
+	For Each orderRow As Map In ordersRows
+		If SyncedOrderMatchesFilters(orderRow, searchText, currentStatusFilter) Then
+			filteredOrdersRows.Add(orderRow)
+		End If
+	Next
+
+	BuildOrderList
+End Sub
+
+Private Sub SyncedOrderMatchesFilters(orderRow As Map, searchText As String, statusFilter As String) As Boolean
+	If searchText <> "" Then
+		Dim haystack As String = _
+			GetStringValue(orderRow, "order_id") & " " & _
+			GetStringValue(orderRow, "transaction_number") & " " & _
+			GetStringValue(orderRow, "device_id") & " " & _
+			GetSyncedOrderStateLabel(orderRow)
+		If haystack.ToLowerCase.Contains(searchText) = False Then Return False
+	End If
+
+	If statusFilter = "All" Then Return True
+	Return GetSyncedOrderStateLabel(orderRow) = statusFilter
+End Sub
+
 Private Sub BuildOrderList
 	clvSyncedOrders.Clear
 
-	For Each orderRow As Map In ordersRows
+	If filteredOrdersRows.Size = 0 Then
+		lblStatus.Text = "No synced orders match the filter."
+		Return
+	End If
+
+	For Each orderRow As Map In filteredOrdersRows
 		Dim orderId As Int = GetIntValue(orderRow, "order_id")
 		Dim card As Panel
 		card.Initialize("")
@@ -156,18 +224,18 @@ Private Sub BuildOrderList
 
 		Dim lblMeta As Label
 		lblMeta.Initialize("")
-		lblMeta.Text = GetStringValue(orderRow, "order_date") & "  •  Status: " & GetStringValue(orderRow, "status") & "  •  ₱" & NumberFormat2(GetDoubleValue(orderRow, "total_amount"), 1, 2, 2, False)
+		lblMeta.Text = GetStringValue(orderRow, "order_date") & "  •  " & GetSyncedOrderStateLabel(orderRow) & "  •  ₱" & NumberFormat2(GetDoubleValue(orderRow, "total_amount"), 1, 2, 2, False)
 		lblMeta.TextSize = 12
 		lblMeta.TextColor = Colors.RGB(33, 150, 243)
 		card.AddView(lblMeta, 12dip, 54dip, 72%x, 18dip)
 
 		Dim lblSync As Label
 		lblSync.Initialize("")
-		lblSync.Text = GetStringValue(orderRow, "status")
+		lblSync.Text = GetSyncedOrderBadgeLabel(orderRow)
 		lblSync.TextSize = 12
 		lblSync.TextColor = Colors.White
 		lblSync.Gravity = Gravity.CENTER
-		lblSync.Color = Colors.RGB(76, 175, 80)
+		lblSync.Color = GetSyncedOrderStateColor(orderRow)
 		card.AddView(lblSync, card.Width - 96dip, 10dip, 82dip, 24dip)
 
 		clvSyncedOrders.Add(card, orderId)
@@ -213,7 +281,7 @@ Private Sub ShowOrderDetails(orderId As Int)
 		sb.Append("Transaction: " & GetStringValue(data, "transaction_number") & CRLF)
 		sb.Append("Device: " & GetStringValue(data, "device_id") & CRLF)
 		sb.Append("Date: " & GetStringValue(data, "order_date") & CRLF)
-		sb.Append("Status: " & GetStringValue(data, "status") & CRLF)
+		sb.Append("Status: " & GetSyncedOrderStateLabel(data) & CRLF)
 		sb.Append("Total: ₱" & NumberFormat2(GetDoubleValue(data, "total_amount"), 1, 2, 2, False) & CRLF & CRLF)
 		sb.Append("Items:" & CRLF)
 
@@ -264,6 +332,39 @@ Private Sub GetIntValue(source As Map, key As String) As Int
 	If source.ContainsKey(key) = False Then Return 0
 	If source.Get(key) = Null Then Return 0
 	Return source.Get(key)
+End Sub
+
+Private Sub GetSyncedOrderStateLabel(orderRow As Map) As String
+	Dim isPaid As Boolean = GetIntValue(orderRow, "is_paid") = 1
+	Dim isReceived As Boolean = GetIntValue(orderRow, "is_received") = 1
+	Dim isBooked As Boolean = GetIntValue(orderRow, "is_booked") = 1
+
+	If isPaid And isReceived Then Return "Paid + Received"
+	If isPaid And isBooked Then Return "Paid + Booked"
+	If isBooked Then Return "Booked"
+	If isPaid Then Return "Paid"
+	Return "Unpaid"
+End Sub
+
+Private Sub GetSyncedOrderBadgeLabel(orderRow As Map) As String
+	Dim isPaid As Boolean = GetIntValue(orderRow, "is_paid") = 1
+	Dim isBooked As Boolean = GetIntValue(orderRow, "is_booked") = 1
+
+	If isPaid Then Return "Paid"
+	If isBooked Then Return "Booked"
+	Return "Unpaid"
+End Sub
+
+Private Sub GetSyncedOrderStateColor(orderRow As Map) As Int
+	Dim isPaid As Boolean = GetIntValue(orderRow, "is_paid") = 1
+	Dim isReceived As Boolean = GetIntValue(orderRow, "is_received") = 1
+	Dim isBooked As Boolean = GetIntValue(orderRow, "is_booked") = 1
+
+	If isPaid And isReceived Then Return Colors.RGB(46, 125, 50)
+	If isPaid And isBooked Then Return Colors.RGB(33, 150, 243)
+	If isBooked Then Return Colors.RGB(255, 152, 0)
+	If isPaid Then Return Colors.RGB(76, 175, 80)
+	Return Colors.RGB(198, 40, 40)
 End Sub
 
 Private Sub GetDoubleValue(source As Map, key As String) As Double

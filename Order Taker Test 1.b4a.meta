@@ -34,6 +34,6 @@ ModuleClosedNodes6=
 ModuleClosedNodes7=
 ModuleClosedNodes8=
 ModuleClosedNodes9=
-NavigationStack=Main,SetupLoginDatabase,121,0,addOrderActivity,btnCancelSelection_Click,1010,0,addOrderActivity,UpdateToggleVisuals,423,0,addOrderActivity,LayoutPurchaseStatusOptions,284,0,OrderTakerDashboard,Globals,55,0,OrderTakerDashboard,DrawPieChartLegend,2324,0,addOrderActivity,btnYesDelete_Click,1003,0,addOrderActivity,btnNoDelete_Click,981,0
+NavigationStack=Visual Designer,supervisorsyncedorders.bal,-100,6,SupervisorSyncedOrders,Activity_Resume,47,0,SupervisorSyncedOrders,Activity_Create,27,0,Visual Designer,SupervisorOrderTakerSelection.bal,-100,6,OrderTakerDashboard,SetupDashboardCards,2056,0,OrderTakerDashboard,DrawPieChartLegend,2372,0,Visual Designer,customerSelection.bal,-100,6,customerSelection,Process_Globals,10,0,OrderTakerDashboard,BuildOrderStatusDisplay,1782,0,OrderTakerDashboard,CreateInventoryRow,697,0
 SelectedBuild=0
 VisibleModules=1,3,5,8,11,9,7,10

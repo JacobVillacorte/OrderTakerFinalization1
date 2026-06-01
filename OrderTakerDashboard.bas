@@ -360,6 +360,18 @@ Private Sub RefreshOrdersPaginationBar
 	bttnOrdersNext.Enabled = currentOrdersPage < totalOrdersPages
 End Sub
 
+Private Sub bttnOrdersPrev_Click
+	If currentOrdersPage <= 1 Then Return
+	currentOrdersPage = currentOrdersPage - 1
+	LoadOrdersIntoList
+End Sub
+
+Private Sub bttnOrdersNext_Click
+	If currentOrdersPage >= totalOrdersPages Then Return
+	currentOrdersPage = currentOrdersPage + 1
+	LoadOrdersIntoList
+End Sub
+
 Private Sub GetOrdersWhereClause(searchText As String) As String
 	Dim sql As String = "FROM orders WHERE vendor_id = ? AND user_id = ? AND IFNULL(sync_status, '') <> 'Cancelled' "
 	If searchText <> "" Then
@@ -1775,6 +1787,44 @@ Private Sub BuildOrderStatusDisplay(isPaid As Boolean, isReceived As Boolean, is
 	Return result
 End Sub
 
+'Private Sub GetOrderDisplayStatus(orderID As Int, fallbackStatus As String) As String
+'	Try
+'		Dim rsStatus As ResultSet = Main.SQLProducts.ExecQuery2( _
+'			"SELECT * FROM orders WHERE order_id = ?", _
+'			Array As String(orderID))
+'		If rsStatus.NextRow Then
+'			Dim flags As Map = ResolveOrderFulfillmentFlags(rsStatus)
+'			rsStatus.Close
+'			Return BuildOrderStatusDisplay(flags.Get("is_paid"), flags.Get("is_received"), flags.Get("is_booked"))
+'		End If
+'		rsStatus.Close
+'	Catch
+'		Log("GetOrderDisplayStatus boolean path error: " & LastException.Message)
+'	End Try
+'
+'	If fallbackStatus <> "" And fallbackStatus <> "Pending" Then
+'		Return fallbackStatus
+'	End If
+'
+'	Try
+'		Dim rs As ResultSet = Main.SQLProducts.ExecQuery2( _
+'			"SELECT fulfillment_status FROM order_items WHERE order_id = ? LIMIT 1", _
+'			Array As String(orderID))
+'		If rs.NextRow Then
+'			Dim fulfillmentStatus As String = rs.GetString("fulfillment_status")
+'			If fulfillmentStatus <> Null And fulfillmentStatus <> "" Then
+'				rs.Close
+'				Return fulfillmentStatus
+'			End If
+'		End If
+'		rs.Close
+'	Catch
+'		Log("GetOrderDisplayStatus error: " & LastException.Message)
+'	End Try
+'
+'	Return fallbackStatus
+'End Sub
+
 ' ======================
 ' INVENTORY TAB
 ' ======================
@@ -2075,14 +2125,12 @@ Private Sub SetupDashboardCards
 	cdFetch.Initialize(Colors.RGB(33, 150, 243), 8dip)
 	bttnFetchProducts.Background = cdFetch
 	bttnFetchProducts.TextColor = Colors.White
-	bttnFetchProducts.SetLayout(M + P, Y + 10dip, W - (P * 2), 42dip)
 	bttnFetchProducts.BringToFront
 
 	Dim cdSync As ColorDrawable
-	cdSync.Initialize(Colors.RGB(240, 240, 240), 8dip)
+	cdSync.Initialize(Colors.RGB(33, 150, 243), 8dip)
 	bttnSyncOrdersNow.Background = cdSync
-	bttnSyncOrdersNow.TextColor = Colors.RGB(55, 65, 81)
-	bttnSyncOrdersNow.SetLayout(M + P, Y + 56dip, W - (P * 2), 42dip)
+	bttnSyncOrdersNow.TextColor = Colors.White
 	bttnSyncOrdersNow.BringToFront
 End Sub
 
